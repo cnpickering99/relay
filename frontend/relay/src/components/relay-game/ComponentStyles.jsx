@@ -2,7 +2,7 @@
 
 // ── Design tokens ──
 const C = {
-  purpleBg: "#7B74C2",
+  purpleBg: "#7b74c2",
   purpleCard: "#8B85CE",
   purpleDeep: "#6960B0",
   purplePill: "#9D98D8",

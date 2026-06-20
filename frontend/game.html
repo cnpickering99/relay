@@ -175,7 +175,7 @@
     /* ── SUBMIT ── */
     .submit-btn {
       width: 100%;
-      background: rgba(255,255,255,0.12);
+      background: #7b74c2;
       border: 2px solid rgba(255,255,255,0.18);
       border-radius: 14px;
       padding: 18px;
@@ -191,6 +191,7 @@
     }
     .submit-btn:hover { background: rgba(255,255,255,0.2); }
     .submit-btn:active { transform: scale(0.98); }
+    .submit-btn:not(:hover):not(:active) { background: #7b74c2; }
 
     /* ── WORDS USED ── */
     .words-used-label {
@@ -225,7 +226,7 @@
       left: 50%;
       transform: translateX(-50%) translateY(-80px);
       background: #2A2A2A;
-      color: #fff;
+      color: var(--gold);
       padding: 10px 20px;
       border-radius: 999px;
       font-size: 13px;

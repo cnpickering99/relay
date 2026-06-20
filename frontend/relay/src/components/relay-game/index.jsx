@@ -4,6 +4,7 @@ import ChainPill from "./Chainpill.jsx";
 import * as C from "./ComponentStyles.jsx";
 import Connector from "./Connecter.jsx";
 import Toast from "./Toast.jsx";
+import { isWordReal } from "./../../api/dictionaryapi.js";
 
 const font = "'Poppins', 'Nunito', sans-serif";
 
@@ -12,9 +13,9 @@ const getFragment = (word) => word.slice(-2).toUpperCase();
 
 // ── Main game ──
 export default function RelayGame() {
-  const [wordsUsed, setWordsUsed] = useState(["SHARP", "ARROWN"]);
-  const [fragment, setFragment] = useState("WN");
-  const [score, setScore] = useState(14);
+  const [wordsUsed, setWordsUsed] = useState([]);
+  const [fragment, setFragment] = useState("ROW");
+  const [score, setScore] = useState(0);
   const [input, setInput] = useState("");
   const [toast, setToast] = useState({ message: "", type: "" });
   const toastTimer = useRef(null);
@@ -26,9 +27,25 @@ export default function RelayGame() {
     toastTimer.current = setTimeout(() => setToast({ message: "", type: "" }), 2000);
   }, []);
 
-  const submitWord = useCallback(() => {
+  const submitWord = async (event) => {
     const word = input.trim().toUpperCase();
-    if (!word) return;
+    console.log(word);
+
+    //turn the iswordreal function to await style
+    const isReal = await isWordReal(word);
+    if (!isReal) {
+        console.log("Word is not real!");
+        showToast("Not a real word!", "error");
+        setInput("");
+        return;
+      } else {
+        console.log("Word is real!");
+      }
+
+
+
+
+   // if (!word) return;
     if (word.length < 3) { showToast("Word too short", "error"); return; }
     if (!word.startsWith(fragment)) { showToast(`Must start with "${fragment}"`, "error"); return; }
     if (wordsUsed.includes(word)) { showToast("Already used!", "error"); return; }
@@ -40,7 +57,7 @@ export default function RelayGame() {
     setInput("");
     showToast(`+${word.length} pts`, "success");
     inputRef.current?.focus();
-  }, [input, fragment, wordsUsed, showToast]);
+  };
 
   useEffect(() => {
     const handler = (e) => { if (e.key === "Enter") submitWord(); };
@@ -72,7 +89,7 @@ export default function RelayGame() {
       <div style={{
         width: 390,
         minHeight: 780,
-        background: C.purpleBg,
+        background: "#7b74c2",
         borderRadius: 44,
         padding: "36px 28px 40px",
         display: "flex",
@@ -142,7 +159,7 @@ export default function RelayGame() {
           autoCorrect="off"
           spellCheck={false}
           style={{
-            width: "100%",
+            width: "90%",
             background: C.darkInput,
             border: "none",
             borderRadius: 14,
@@ -163,7 +180,7 @@ export default function RelayGame() {
           onClick={submitWord}
           style={{
             width: "100%",
-            background: "rgba(255,255,255,0.12)",
+            background: "#7b74c2",
             border: "2px solid rgba(255,255,255,0.18)",
             borderRadius: 14,
             padding: 18,
