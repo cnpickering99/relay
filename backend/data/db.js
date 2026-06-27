@@ -1,0 +1,47 @@
+// db.js
+const { Pool } = require('pg');
+
+const config = {
+    user: "avnadmin",
+    password: "AVNS_Z4vaG-t_ka-PKuYDBLR",
+    host: "pg-157bfb46-codeninjaspickering-da48.a.aivencloud.com",
+    port: 20450,
+    database: "defaultdb",
+    ssl: {
+        rejectUnauthorized: true,
+        ca: `-----BEGIN CERTIFICATE-----
+MIIERDCCAqygAwIBAgIUPpPCQGRW2yvNJ4N3/Ou7/KVXKEcwDQYJKoZIhvcNAQEM
+BQAwOjE4MDYGA1UEAwwvNzEzODczNjgtMjA2YS00Nzk1LWI2MDEtM2MyYjg2MmIx
+MGU4IFByb2plY3QgQ0EwHhcNMjYwNjI3MTUxOTQ2WhcNMzYwNjI0MTUxOTQ2WjA6
+MTgwNgYDVQQDDC83MTM4NzM2OC0yMDZhLTQ3OTUtYjYwMS0zYzJiODYyYjEwZTgg
+UHJvamVjdCBDQTCCAaIwDQYJKoZIhvcNAQEBBQADggGPADCCAYoCggGBAIw2ATV3
+zfr1aibi2bgVD5V247Tthfq4Alpunueq6w6E2NNEm/99vdZNHGHIHNK5+RV/Skz5
+4JLb6cfrmxMPl4RLIp66pUhB0SohAj7A1GC2gGxCme385Oqb7U53WyZp3HhYXiIM
+xIKc0KTrHxUgVDN6V0Qk5p6vGCNfWvJJCABkzQ6eUUWPdUdiN6y8OV6Zbj5TVFY1
+ksy4rlXCVT/uYwU7NFANYPYrQb5VdOKKMkXwDAK+YH1BbjcihqWfNvG0Mv9+9tQl
+luDuEHZkEN6Qg8jEkLmrY19BFVyQdH+eBhixEyPge/sNVZCL+C7P9Em7bYpkz5Ml
+hIopK9iIZKA20pHQacPwOHNIB2kugW1ZucV9qJ3ritXbNaFGgQQxSNTbQZE3e6mG
+RBt70X7pI8DVKM1gH5N+xMcVatuj/AD4A3zS/L9sM2SYP7PpG2PAbjv3WoJzcl9Z
+XvD4x3J2RmhCXooOdhmtuuOtmjPld8oCDQPiV2fKO6RMRNoHQe0UUuPcuQIDAQAB
+o0IwQDAdBgNVHQ4EFgQU0YZAMzBIoPTZn4NWSx7wLyTRdUgwEgYDVR0TAQH/BAgw
+BgEB/wIBADALBgNVHQ8EBAMCAQYwDQYJKoZIhvcNAQEMBQADggGBAFcgetxQp08x
+q+FK1XcPGM7HK5PaDoHMbDaiHVJtpdMdvxytJZh7pYMSgs396+wDx8kJj9KPzqFc
+iPWnHpHlC044+faDBsJJX6icj5fUMJYWjegO/Id5noUZCHg+YFRp7h0fMD3rSrK5
+4GqRVR97n2bmWiN7IVSx3bAyAVdBoQhN7E+PIHRgs20iPECD0mvXj2Lpwwr3w4N5
+KDgQD1PWr5SwHA6oG6hnXsLYW5Ks8tn5TZvQjnh5oO3+gc4pySIWCMx9WX8Y0463
+GtldC4MUbpcFBiN9ocDw/2IQyVprOWigXueZTmPVZeIqMntDaKdcT6ALeh6+W3IY
+6KYJkEeV+PCR7ohIZGptCUnskNFrL62B0nvdPw5og19LCCKA6e+uJitwCJfsVdi8
+2a60LFqzleJj13SO19cUK5bqxBDvVNS5WBIzHmUIH59X2RJvXAxd0IONwsvXU9Ji
+3jOZ94C2PQx/UJHA6iNzFTjPRJagKRrlrsiXeK2ynxWoZvuUnziZhw==
+-----END CERTIFICATE-----`,
+    },
+};
+
+const pool = new Pool(config);
+
+
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle PG client', err);
+});
+
+module.exports = pool;
