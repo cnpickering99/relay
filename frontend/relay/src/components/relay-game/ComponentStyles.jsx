@@ -1,16 +1,11 @@
-
-
 // ── Design tokens ──
-const C = {
-  purpleBg: "#7b74c2",
-  purpleCard: "#8B85CE",
-  purpleDeep: "#6960B0",
-  purplePill: "#9D98D8",
-  gold: "#F5C518",
-  goldDim: "#D4A800",
-  darkInput: "#2A2A2A",
-  muted: "rgba(255,255,255,0.55)",
-  pillText: "rgba(255,255,255,0.9)",
-};
-
-export default C;
+export const purpleBg = "#7b74c2";
+export const purpleCard = "#6960B0";
+export const purpleDeep = "#5C52A0";
+export const purplePill = "#9D98D8";
+export const gold = "#F5C518";
+export const goldDim = "#C9A800";
+export const darkInput = "#3a3560";
+export const muted = "rgba(255,255,255,0.55)";
+export const pillText = "rgba(255,255,255,0.95)";
+export const white = "#FFFFFF";

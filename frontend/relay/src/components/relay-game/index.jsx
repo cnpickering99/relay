@@ -4,7 +4,9 @@ import ChainPill from "./Chainpill.jsx";
 import * as C from "./ComponentStyles.jsx";
 import Connector from "./Connecter.jsx";
 import Toast from "./Toast.jsx";
-import { isWordReal } from "./../../api/dictionaryapi.js";
+import GameOver from "./GameOver.jsx";
+import Menu from "./Menu.jsx";
+import { validateWord, isChainable } from "../../api/dictionaryapi.js";
 
 const font = "'Poppins', 'Nunito', sans-serif";
 
@@ -18,6 +20,8 @@ export default function RelayGame() {
   const [score, setScore] = useState(0);
   const [input, setInput] = useState("");
   const [toast, setToast] = useState({ message: "", type: "" });
+  const [isGameOver, setIsGameOver] = useState(false);
+  const [showMenu, setShowMenu] = useState(true);
   const toastTimer = useRef(null);
   const inputRef = useRef(null);
 
@@ -27,28 +31,37 @@ export default function RelayGame() {
     toastTimer.current = setTimeout(() => setToast({ message: "", type: "" }), 2000);
   }, []);
 
+  const resetGame = () => {
+    setWordsUsed([]);
+    setFragment("ROW");
+    setScore(0);
+    setInput("");
+    setIsGameOver(false);
+    setShowMenu(true);
+  };
+
   const submitWord = async (event) => {
     const word = input.trim().toUpperCase();
-    console.log(word);
+    if (!word) return;
 
-    //turn the iswordreal function to await style
-    const isReal = await isWordReal(word);
-    if (!isReal) {
-        console.log("Word is not real!");
-        showToast("Not a real word!", "error");
-        setInput("");
-        return;
-      } else {
-        console.log("Word is real!");
-      }
+    // 1. Check if the word is real
+    const result = await validateWord(word);
+    if (!result.valid && result.reason === "NOT_A_WORD") {
+      showToast("Not a real word!", "error");
+      setInput("");
+      return;
+    }
 
-
-
-
-   // if (!word) return;
     if (word.length < 3) { showToast("Word too short", "error"); return; }
     if (!word.startsWith(fragment)) { showToast(`Must start with "${fragment}"`, "error"); return; }
     if (wordsUsed.includes(word)) { showToast("Already used!", "error"); return; }
+
+    // 2. Always check chainability
+    const chainable = await isChainable(word);
+    if (!chainable) {
+      setIsGameOver(true);
+      return;
+    }
 
     const newFragment = getFragment(word);
     setWordsUsed(prev => [...prev, word]);
@@ -65,7 +78,6 @@ export default function RelayGame() {
     return () => window.removeEventListener("keydown", handler);
   }, [submitWord]);
 
-  // Build highlight lengths for chain pills
   const highlights = wordsUsed.map((word, i) => {
     if (i === 0) return 0;
     const prevFrag = getFragment(wordsUsed[i - 1]);
@@ -74,13 +86,14 @@ export default function RelayGame() {
 
   return (
     <div style={{
-      minHeight: "100vh",
-      background: "#1a1a2e",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      fontFamily: font,
-    }}>
+  minHeight: "100vh",
+  width: "100%",
+  background: "#000",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  fontFamily: font,
+}}>
       <link
         href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800;900&family=Nunito:wght@400;600;700;800&display=swap"
         rel="stylesheet"
@@ -89,28 +102,58 @@ export default function RelayGame() {
       <div style={{
         width: 390,
         minHeight: 780,
-        background: "#7b74c2",
+        background: C.purpleBg,
         borderRadius: 44,
         padding: "36px 28px 40px",
         display: "flex",
         flexDirection: "column",
-        boxShadow: "0 40px 80px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.15)",
+        boxShadow: "0 40px 80px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.12)",
         position: "relative",
+        overflow: "hidden",
       }}>
         <Toast message={toast.message} type={toast.type} />
 
+        {/* Menu Overlay */}
+        {showMenu && (
+          <Menu onPlay={() => setShowMenu(false)} />
+        )}
+
+        {/* Game Over Overlay */}
+        {isGameOver && (
+          <GameOver
+            score={score}
+            onPlayAgain={resetGame}
+            onMainMenu={resetGame}
+          />
+        )}
+
         {/* Top bar */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28 }}>
-          <button style={{
-            width: 40, height: 40, borderRadius: 10,
-            border: "2px solid rgba(255,255,255,0.25)",
-            background: "transparent", cursor: "pointer",
-            display: "flex", alignItems: "center", justifyContent: "center",
-          }}>
+          <button
+            onClick={() => setShowMenu(true)}
+            style={{
+              width: 42, height: 42, borderRadius: 12,
+              border: "2px solid rgba(255,255,255,0.2)",
+              background: "rgba(0,0,0,0.15)",
+              cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              transition: "background 0.15s",
+            }}
+            onMouseEnter={e => e.target.style.background = "rgba(0,0,0,0.3)"}
+            onMouseLeave={e => e.target.style.background = "rgba(0,0,0,0.15)"}
+          >
             <MenuIcon />
           </button>
+
           <div style={{ textAlign: "right", lineHeight: 1 }}>
-            <div style={{ fontSize: 40, fontWeight: 900, color: C.gold, letterSpacing: -1, lineHeight: 1 }}>
+            <div style={{
+              fontSize: 42,
+              fontWeight: 900,
+              color: C.gold,
+              letterSpacing: -1,
+              lineHeight: 1,
+              textShadow: "0 0 20px rgba(245,197,24,0.35)",
+            }}>
               {score}
             </div>
             <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", color: C.goldDim }}>
@@ -120,7 +163,10 @@ export default function RelayGame() {
         </div>
 
         {/* Chain track */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 22, overflowX: "auto", paddingBottom: 4 }}>
+        <div style={{
+          display: "flex", alignItems: "center", gap: 6,
+          marginBottom: 22, overflowX: "auto", paddingBottom: 4,
+        }}>
           {wordsUsed.map((word, i) => (
             <>
               <ChainPill key={word + i} word={word} highlightLen={highlights[i]} isCurrent={false} />
@@ -132,19 +178,30 @@ export default function RelayGame() {
 
         {/* Chain from card */}
         <div style={{
-          background: C.purpleCard,
-          borderRadius: 18,
+          background: C.purpleDeep,
+          borderRadius: 20,
           padding: "24px 22px 22px",
           marginBottom: 18,
-          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.12)",
+          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 20px rgba(0,0,0,0.2)",
+          border: "1px solid rgba(255,255,255,0.08)",
         }}>
-          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.2em", color: C.gold, marginBottom: 8 }}>
+          <div style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: "0.2em",
+            color: C.gold, marginBottom: 8,
+          }}>
             CHAIN FROM
           </div>
-          <div style={{ fontSize: 64, fontWeight: 900, color: C.gold, lineHeight: 1, marginBottom: 14, letterSpacing: -2 }}>
+          <div style={{
+            fontSize: 64, fontWeight: 900, color: C.gold,
+            lineHeight: 1, marginBottom: 14, letterSpacing: -2,
+            textShadow: "0 0 30px rgba(245,197,24,0.3)",
+          }}>
             {fragment}
           </div>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.14em", color: C.muted, textTransform: "uppercase" }}>
+          <div style={{
+            fontSize: 11, fontWeight: 600, letterSpacing: "0.14em",
+            color: C.muted, textTransform: "uppercase",
+          }}>
             YOUR NEXT WORD MUST START WITH {fragment}
           </div>
         </div>
@@ -160,19 +217,20 @@ export default function RelayGame() {
           spellCheck={false}
           style={{
             width: "90%",
-            background: C.darkInput,
-            border: "none",
+            background: "rgba(0,0,0,0.25)",
+            border: "2px solid rgba(255,255,255,0.1)",
             borderRadius: 14,
             padding: "18px 20px",
             fontSize: 16,
-            fontWeight: 500,
-            color: "#fff",
+            fontWeight: 600,
+            color: C.white,
             outline: "none",
             marginBottom: 12,
             fontFamily: font,
+            transition: "border-color 0.15s",
           }}
-          onFocus={e => { e.target.style.boxShadow = `0 0 0 2px ${C.gold}`; }}
-          onBlur={e => { e.target.style.boxShadow = "none"; }}
+          onFocus={e => { e.target.style.borderColor = C.gold; }}
+          onBlur={e => { e.target.style.borderColor = "rgba(255,255,255,0.1)"; }}
         />
 
         {/* Submit */}
@@ -180,36 +238,41 @@ export default function RelayGame() {
           onClick={submitWord}
           style={{
             width: "100%",
-            background: "#7b74c2",
-            border: "2px solid rgba(255,255,255,0.18)",
+            background: C.gold,
+            border: "none",
             borderRadius: 14,
             padding: 18,
             fontSize: 14,
             fontWeight: 800,
             letterSpacing: "0.18em",
-            color: "#fff",
+            color: "#1a1a2e",
             cursor: "pointer",
             textTransform: "uppercase",
             marginBottom: 28,
             fontFamily: font,
-            transition: "background 0.15s",
+            transition: "opacity 0.15s, transform 0.1s",
+            boxShadow: "0 4px 20px rgba(245,197,24,0.3)",
           }}
-          onMouseEnter={e => { e.target.style.background = "rgba(255,255,255,0.2)"; }}
-          onMouseLeave={e => { e.target.style.background = "rgba(255,255,255,0.12)"; }}
-          onMouseDown={e => { e.target.style.transform = "scale(0.98)"; }}
-          onMouseUp={e => { e.target.style.transform = "scale(1)"; }}
+          onMouseEnter={e => e.target.style.opacity = "0.9"}
+          onMouseLeave={e => e.target.style.opacity = "1"}
+          onMouseDown={e => e.target.style.transform = "scale(0.98)"}
+          onMouseUp={e => e.target.style.transform = "scale(1)"}
         >
           SUBMIT
         </button>
 
         {/* Words used */}
-        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", color: C.muted, marginBottom: 12, textTransform: "uppercase" }}>
+        <div style={{
+          fontSize: 10, fontWeight: 700, letterSpacing: "0.18em",
+          color: C.muted, marginBottom: 12, textTransform: "uppercase",
+        }}>
           WORDS USED
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           {wordsUsed.map((w, i) => (
             <div key={w + i} style={{
-              background: "rgba(255,255,255,0.12)",
+              background: "rgba(0,0,0,0.2)",
+              border: "1px solid rgba(255,255,255,0.12)",
               borderRadius: 999,
               padding: "7px 14px",
               fontSize: 12,
