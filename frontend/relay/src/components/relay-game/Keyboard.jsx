@@ -1,60 +1,112 @@
+import { memo, useCallback, useRef } from "react";
 import * as C from "./ComponentStyles.jsx";
 
 const font = "'Poppins', 'Nunito', sans-serif";
 
 const ROWS = [
-  ["Q","W","E","R","T","Y","U","I","O","P"],
-  ["A","S","D","F","G","H","J","K","L"],
-  ["ENTER","Z","X","C","V","B","N","M","BACK"],
+  ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
+  ["A", "S", "D", "F", "G", "H", "J", "K", "L"],
+  ["ENTER", "Z", "X", "C", "V", "B", "N", "M", "BACK"],
 ];
 
-function Key({ label, onPress, wide }) {
-  const isSpecial = label === "ENTER" || label === "BACK";
+const SPECIAL = new Set(["ENTER", "BACK"]);
+const ARIA_LABEL = { ENTER: "Enter", BACK: "Backspace" };
+
+// Shared by reference across every key of the same kind, so a re-render
+// never allocates 26 new style objects.
+const KEY_STYLE = {
+  flex: 1,
+  minWidth: 0,
+  height: 46,
+  margin: 3,
+  borderRadius: 8,
+  border: "none",
+  background: "rgba(255,255,255,0.12)",
+  color: C.white,
+  fontFamily: font,
+  fontWeight: 700,
+  fontSize: 14,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
+
+const KEY_STYLE_SPECIAL = {
+  ...KEY_STYLE,
+  flex: 1.6,
+  background: C.purpleDeep,
+  fontSize: 11,
+  letterSpacing: "0.05em",
+};
+
+// Press feedback lives in CSS (`.is-pressed`, toggled imperatively) instead
+// of per-key mousedown/mouseup React state. Mouse events don't reliably
+// fire for touch input inside an iOS WebView/PWA, so the old approach could
+// silently never animate on-device; pointer events cover touch and mouse
+// uniformly and never trigger a re-render.
+const KEYBOARD_CSS = `
+  .rg-key {
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    transition: transform 0.08s ease-out, background 0.1s ease-out;
+  }
+  .rg-key.is-pressed {
+    transform: scale(0.94);
+  }
+`;
+
+const Key = memo(function Key({ label }) {
+  const isSpecial = SPECIAL.has(label);
   return (
     <button
-      onClick={() => onPress(label)}
-      style={{
-        flex: wide ? 1.6 : 1,
-        minWidth: 0,
-        height: 46,
-        margin: "3px",
-        borderRadius: 8,
-        border: "none",
-        background: isSpecial ? C.purpleDeep : "rgba(255,255,255,0.12)",
-        color: C.white,
-        fontFamily: font,
-        fontWeight: 700,
-        fontSize: isSpecial ? 11 : 14,
-        letterSpacing: isSpecial ? "0.05em" : 0,
-        cursor: "pointer",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        userSelect: "none",
-        transition: "background 0.1s, transform 0.05s",
-      }}
-      onMouseDown={e => e.currentTarget.style.transform = "scale(0.94)"}
-      onMouseUp={e => e.currentTarget.style.transform = "scale(1)"}
-      onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}
+      type="button"
+      className="rg-key"
+      data-key={label}
+      aria-label={ARIA_LABEL[label] ?? label}
+      style={isSpecial ? KEY_STYLE_SPECIAL : KEY_STYLE}
     >
       {label === "BACK" ? "⌫" : label}
     </button>
   );
-}
+});
 
 export default function Keyboard({ onKeyPress }) {
+  const pressedRef = useRef(null);
+
+  const clearPressed = useCallback(() => {
+    pressedRef.current?.classList.remove("is-pressed");
+    pressedRef.current = null;
+  }, []);
+
+  const handlePointerDown = useCallback((e) => {
+    const btn = e.target.closest("button[data-key]");
+    if (!btn) return;
+    btn.classList.add("is-pressed");
+    pressedRef.current = btn;
+  }, []);
+
+  const handleClick = useCallback((e) => {
+    const btn = e.target.closest("button[data-key]");
+    if (btn) onKeyPress(btn.dataset.key);
+  }, [onKeyPress]);
+
   return (
-    <div style={{ width: "100%", userSelect: "none" }}>
+    <div
+      role="group"
+      aria-label="On-screen keyboard"
+      style={{ width: "100%", userSelect: "none" }}
+      onPointerDown={handlePointerDown}
+      onPointerUp={clearPressed}
+      onPointerCancel={clearPressed}
+      onPointerLeave={clearPressed}
+      onClick={handleClick}
+    >
+      <style>{KEYBOARD_CSS}</style>
       {ROWS.map((row, i) => (
         <div key={i} style={{ display: "flex", justifyContent: "center" }}>
-          {row.map(label => (
-            <Key
-              key={label}
-              label={label}
-              wide={label === "ENTER" || label === "BACK"}
-              onPress={onKeyPress}
-            />
-          ))}
+          {row.map(label => <Key key={label} label={label} />)}
         </div>
       ))}
     </div>
