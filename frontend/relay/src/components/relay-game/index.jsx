@@ -7,6 +7,8 @@ import Toast from "./Toast.jsx";
 import GameOver from "./GameOver.jsx";
 import Menu from "./Menu.jsx";
 import { validateWord, isChainable } from "../../api/dictionaryapi.js";
+import { getRandomFragment } from "./Fragments.js";
+import Keyboard from "./Keyboard.jsx";
 
 const font = "'Poppins', 'Nunito', sans-serif";
 
@@ -16,7 +18,7 @@ const getFragment = (word) => word.slice(-2).toUpperCase();
 // ── Main game ──
 export default function RelayGame() {
   const [wordsUsed, setWordsUsed] = useState([]);
-  const [fragment, setFragment] = useState("ROW");
+  const [fragment, setFragment] = useState(() => getRandomFragment());
   const [score, setScore] = useState(0);
   const [input, setInput] = useState("");
   const [toast, setToast] = useState({ message: "", type: "" });
@@ -33,7 +35,7 @@ export default function RelayGame() {
 
   const resetGame = () => {
     setWordsUsed([]);
-    setFragment("ROW");
+    setFragment(getRandomFragment());
     setScore(0);
     setInput("");
     setIsGameOver(false);
@@ -72,6 +74,16 @@ export default function RelayGame() {
     inputRef.current?.focus();
   };
 
+  const handleKeyPress = (key) => {
+    if (key === "ENTER") {
+      submitWord();
+    } else if (key === "BACK") {
+      setInput(prev => prev.slice(0, -1));
+    } else {
+      setInput(prev => prev + key);
+    }
+  };
+
   useEffect(() => {
     const handler = (e) => { if (e.key === "Enter") submitWord(); };
     window.addEventListener("keydown", handler);
@@ -86,14 +98,14 @@ export default function RelayGame() {
 
   return (
     <div style={{
-  minHeight: "100vh",
-  width: "100%",
-  background: "#000",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  fontFamily: font,
-}}>
+      minHeight: "100vh",
+      width: "100%",
+      background: "#000",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontFamily: font,
+    }}>
       <link
         href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800;900&family=Nunito:wght@400;600;700;800&display=swap"
         rel="stylesheet"
@@ -260,6 +272,8 @@ export default function RelayGame() {
         >
           SUBMIT
         </button>
+
+        <Keyboard onKeyPress={handleKeyPress} />
 
         {/* Words used */}
         <div style={{
