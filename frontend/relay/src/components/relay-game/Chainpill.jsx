@@ -1,6 +1,5 @@
 import * as C from "./ComponentStyles.jsx";
-import { font } from "../../Util/Utils.jsx";
-
+export const font = "'Poppins', 'Nunito', sans-serif";
 function ChainPill({ word, highlightLen, isCurrent, fragment }) {
   const base = {
     borderRadius: 999,
