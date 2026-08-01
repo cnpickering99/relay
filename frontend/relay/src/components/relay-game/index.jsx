@@ -10,6 +10,7 @@ import LoadingScreen from "./LoadingScreen.jsx";
 import { validateWord, isChainable } from "../../api/dictionaryapi.js";
 import { getRandomFragment } from "./Fragments.js";
 import Keyboard from "./Keyboard.jsx";
+import UsedWords from "./UsedWords.jsx";
 
 const font = "'Poppins', 'Nunito', sans-serif";
 const getFragment = (word) => word.slice(-2).toUpperCase();
@@ -290,15 +291,8 @@ export default function RelayGame() {
           </div>
 
           {/* Chain track */}
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 22, overflowX: "auto", paddingBottom: 4 }}>
-            {wordsUsed.map((word, i) => (
-              <>
-                <ChainPill key={word + i} word={word} highlightLen={highlights[i]} isCurrent={false} />
-                <Connector key={"dot-" + i} />
-              </>
-            ))}
-            <ChainPill isCurrent fragment={fragment} />
-          </div>
+                <UsedWords wordsUsed={wordsUsed} fragment={fragment} highlightLen={highlights}/> 
+
 
           {/* Chain from card */}
           <div style={{
@@ -364,18 +358,8 @@ export default function RelayGame() {
             WORDS USED
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {wordsUsed.map((w, i) => (
-              <div key={w + i} style={{
-                background: "rgba(0,0,0,0.2)",
-                border: "1px solid rgba(255,255,255,0.12)",
-                borderRadius: 999, padding: "7px 14px",
-                fontSize: 12, fontWeight: 700,
-                letterSpacing: "0.08em", color: C.pillText,
-                animation: "pillPop 0.35s cubic-bezier(0.34,1.56,0.64,1) forwards",
-              }}>
-                {w}
-              </div>
-            ))}
+       {/* Chain track */}
+       <UsedWords wordsUsed={wordsUsed} fragment={fragment} highlightLen={highlights}/> 
           </div>
         </div>
       </div>

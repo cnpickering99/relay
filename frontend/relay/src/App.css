@@ -183,3 +183,48 @@
   }
   
 }
+/* Hide scrollbar but keep scroll working */
+.words-chain {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  flex-direction: row;
+  overflow-x: scroll;
+  padding-bottom: 4px;
+
+  /* Hide scrollbar on all browsers */
+  scrollbar-width: none;          /* Firefox */
+  -ms-overflow-style: none;       /* IE/Edge */
+}
+
+.words-chain::-webkit-scrollbar {
+  display: none;                  /* Chrome, Safari */
+}
+/* Wrapper that creates the fade effect on both sides */
+.words-chain-wrapper {
+  position: relative;
+  overflow: hidden;
+}
+
+.words-chain-wrapper::before,
+.words-chain-wrapper::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 32px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* Left fade */
+.words-chain-wrapper::before {
+  left: 0;
+  background: linear-gradient(to right, #7b74c2, transparent);
+}
+
+/* Right fade */
+.words-chain-wrapper::after {
+  right: 0;
+  background: linear-gradient(to left, #7b74c2, transparent);
+}
