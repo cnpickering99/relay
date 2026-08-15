@@ -124,6 +124,8 @@ export default function GameOver({ score, reason, onPlayAgain, onMainMenu }) {
 
         {/* Buttons */}
         <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%" }}>
+
+          {/* Play Again — skips menu */}
           <button
             onClick={onPlayAgain}
             style={{
@@ -141,6 +143,7 @@ export default function GameOver({ score, reason, onPlayAgain, onMainMenu }) {
             PLAY AGAIN
           </button>
 
+          {/* Share */}
           <button
             onClick={handleShare}
             style={{
@@ -157,6 +160,7 @@ export default function GameOver({ score, reason, onPlayAgain, onMainMenu }) {
             SHARE SCORE
           </button>
 
+          {/* Main Menu — goes back to menu */}
           <button
             onClick={onMainMenu}
             style={{

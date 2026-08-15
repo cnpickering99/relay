@@ -1,6 +1,7 @@
 // Menu.jsx
 import { useState } from "react";
 import * as C from "./ComponentStyles.jsx";
+import Leaderboard from "./Leaderboard.jsx";
 
 const font = "'Poppins', 'Nunito', sans-serif";
 
@@ -167,9 +168,14 @@ function HowToPlay({ onBack }) {
 
 export default function Menu({ onPlay }) {
   const [showHowTo, setShowHowTo] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
 
   if (showHowTo) {
     return <HowToPlay onBack={() => setShowHowTo(false)} />;
+  }
+
+  if (showLeaderboard) {
+    return <Leaderboard onBack={() => setShowLeaderboard(false)} />;
   }
 
   return (
@@ -378,7 +384,7 @@ export default function Menu({ onPlay }) {
         {/* Leaderboard */}
         <button
           className="menu-fade-4"
-          onClick={() => alert("Leaderboard coming soon!")}
+          onClick={() => setShowLeaderboard(true)}
           style={{
             width: "100%",
             background: "transparent",

@@ -11,6 +11,9 @@ import { validateWord, isChainable } from "../../api/dictionaryapi.js";
 import { getRandomFragment } from "./Fragments.js";
 import Keyboard from "./Keyboard.jsx";
 import UsedWords from "./UsedWords.jsx";
+import WordBank from "./WordBank.jsx";
+import Leaderboard from "./Leaderboard.jsx";
+import { submitScore } from "../../api/scoresapi.js";
 
 const font = "'Poppins', 'Nunito', sans-serif";
 const getFragment = (word) => word.slice(-2).toUpperCase();
@@ -24,12 +27,10 @@ export default function RelayGame() {
   const [isGameOver, setIsGameOver] = useState(false);
   const [gameOverReason, setGameOverReason] = useState(null);
 
-  // Loading + menu transition states
   const [showLoading, setShowLoading] = useState(true);
   const [showMenu, setShowMenu] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
 
-  // Animation states
   const [goldFlash, setGoldFlash] = useState(false);
   const [scoreKey, setScoreKey] = useState(0);
   const [flyingWord, setFlyingWord] = useState(null);
@@ -37,14 +38,12 @@ export default function RelayGame() {
   const toastTimer = useRef(null);
   const inputRef = useRef(null);
 
-  // Loading done → fade menu in
   const handleLoadingDone = useCallback(() => {
     setShowLoading(false);
     setShowMenu(true);
     setTimeout(() => setMenuVisible(true), 50);
   }, []);
 
-  // Menu PLAY → fade menu out
   const handlePlay = () => {
     setMenuVisible(false);
     setTimeout(() => setShowMenu(false), 400);
@@ -56,6 +55,7 @@ export default function RelayGame() {
     toastTimer.current = setTimeout(() => setToast({ message: "", type: "" }), 2000);
   }, []);
 
+  // Goes back to menu
   const resetGame = () => {
     setWordsUsed([]);
     setFragment(getRandomFragment());
@@ -68,6 +68,16 @@ export default function RelayGame() {
       setShowMenu(true);
       setTimeout(() => setMenuVisible(true), 50);
     }, 300);
+  };
+
+  // Skips menu — straight into a new game
+  const restartGame = () => {
+    setWordsUsed([]);
+    setFragment(getRandomFragment());
+    setScore(0);
+    setInput("");
+    setIsGameOver(false);
+    setGameOverReason(null);
   };
 
   const triggerGoldFlash = () => {
@@ -85,7 +95,6 @@ export default function RelayGame() {
     const word = input.trim().toUpperCase();
     if (!word) return;
 
-    // 1. Check if real word
     const result = await validateWord(word);
     if (!result.valid && result.reason === "NOT_A_WORD") {
       showToast("Not a real word!", "error");
@@ -97,16 +106,17 @@ export default function RelayGame() {
     if (!word.startsWith(fragment)) { showToast(`Must start with "${fragment}"`, "error"); return; }
     if (wordsUsed.includes(word)) { showToast("Already used!", "error"); return; }
 
-    // 2. Check chainability
     const chainable = await isChainable(word);
     if (!chainable) {
       const lastTwo = word.slice(-2).toUpperCase();
       setGameOverReason({ word, lastTwo });
       setIsGameOver(true);
+
+      // Submit score to backend
+      await submitScore("Player", score, wordsUsed.length);
       return;
     }
 
-    // 3. Valid word — trigger animations then update state
     triggerFlyingWord(word);
     triggerGoldFlash();
 
@@ -142,7 +152,6 @@ export default function RelayGame() {
 
   return (
     <>
-      {/* Loading screen sits above everything */}
       {showLoading && <LoadingScreen onDone={handleLoadingDone} />}
 
       <div style={{
@@ -226,7 +235,7 @@ export default function RelayGame() {
             </div>
           )}
 
-          {/* Menu overlay with fade + scale transition */}
+          {/* Menu overlay */}
           {showMenu && (
             <div style={{
               position: "absolute",
@@ -241,32 +250,51 @@ export default function RelayGame() {
             </div>
           )}
 
-          {/* Game Over — slides up from bottom */}
+          {/* Game Over */}
           {isGameOver && (
             <GameOver
               score={score}
               reason={gameOverReason}
-              onPlayAgain={resetGame}
+              onPlayAgain={restartGame}
               onMainMenu={resetGame}
             />
           )}
 
           {/* Top bar */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28 }}>
-            <button
-              onClick={() => { setShowMenu(true); setTimeout(() => setMenuVisible(true), 50); }}
-              style={{
-                width: 42, height: 42, borderRadius: 12,
-                border: "2px solid rgba(255,255,255,0.2)",
-                background: "rgba(0,0,0,0.15)", cursor: "pointer",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                transition: "background 0.15s",
-              }}
-              onMouseEnter={e => e.currentTarget.style.background = "rgba(0,0,0,0.3)"}
-              onMouseLeave={e => e.currentTarget.style.background = "rgba(0,0,0,0.15)"}
-            >
-              <MenuIcon />
-            </button>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                onClick={() => { setShowMenu(true); setTimeout(() => setMenuVisible(true), 50); }}
+                style={{
+                  width: 42, height: 42, borderRadius: 12,
+                  border: "2px solid rgba(255,255,255,0.2)",
+                  background: "rgba(0,0,0,0.15)", cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  transition: "background 0.15s",
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = "rgba(0,0,0,0.3)"}
+                onMouseLeave={e => e.currentTarget.style.background = "rgba(0,0,0,0.15)"}
+              >
+                <MenuIcon />
+              </button>
+
+              <button
+                onClick={restartGame}
+                style={{
+                  width: 42, height: 42, borderRadius: 12,
+                  border: "2px solid rgba(255,255,255,0.2)",
+                  background: "rgba(0,0,0,0.15)", cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  transition: "background 0.15s",
+                  fontSize: 18,
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = "rgba(0,0,0,0.3)"}
+                onMouseLeave={e => e.currentTarget.style.background = "rgba(0,0,0,0.15)"}
+                title="Restart game"
+              >
+                🔄
+              </button>
+            </div>
 
             <div style={{ textAlign: "right", lineHeight: 1 }}>
               <div
@@ -290,9 +318,8 @@ export default function RelayGame() {
             </div>
           </div>
 
-          {/* Chain track */}
-                <UsedWords wordsUsed={wordsUsed} fragment={fragment} highlightLen={highlights}/> 
-
+          {/* Chain track — horizontal scroll */}
+          <UsedWords wordsUsed={wordsUsed} fragment={fragment} highlightLen={highlights} />
 
           {/* Chain from card */}
           <div style={{
@@ -353,14 +380,9 @@ export default function RelayGame() {
 
           <Keyboard onKeyPress={handleKeyPress} />
 
-          {/* Words used */}
-          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", color: C.muted, marginBottom: 12, textTransform: "uppercase" }}>
-            WORDS USED
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-       {/* Chain track */}
-       <UsedWords wordsUsed={wordsUsed} fragment={fragment} highlightLen={highlights}/> 
-          </div>
+          {/* Word bank — wrapping grid */}
+          <WordBank wordsUsed={wordsUsed} />
+
         </div>
       </div>
     </>

@@ -17,6 +17,11 @@
   }
 }
 
+/* Hide webkit scrollbar on chain track */
+div::-webkit-scrollbar {
+  display: none;
+}
+
 .hero {
   position: relative;
 
