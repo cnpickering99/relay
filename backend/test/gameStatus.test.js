@@ -1,4 +1,4 @@
-const GameStatus = require('../multiplayer/gameStatus');
+const { GameStatus } = require('../multiplayer/enums');
 const RoomManager = require('../multiplayer/roomManager');
 
 describe('GameStatus', () => {

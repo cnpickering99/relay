@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const GameStatus = require('./gameStatus');
+const { GameStatus } = require('./enums');
 
 class RoomManager {
   constructor() {
@@ -121,3 +121,4 @@ class RoomManager {
 }
 
 module.exports = RoomManager;
+module.exports.GameStatus = GameStatus;
