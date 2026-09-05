@@ -10,12 +10,21 @@ export default function Leaderboard({ onBack }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    async function fetchScores() {
+    let active = true;
+
+    const loadScores = async () => {
       const data = await getLeaderboard();
-      setScores(data);
-      setLoading(false);
-    }
-    fetchScores();
+      if (active) {
+        setScores(data);
+        setLoading(false);
+      }
+    };
+
+    loadScores();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const medals = ["🥇", "🥈", "🥉"];
