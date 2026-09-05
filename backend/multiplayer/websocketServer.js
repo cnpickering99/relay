@@ -1,9 +1,10 @@
-const { WebSocketServer } = require('ws');
+const WebSocket = require('ws');
+const { WebSocketServer } = WebSocket;
 const crypto = require('crypto');
 const RoomManager = require('./roomManager');
 
 function send(socket, type, payload = {}) {
-  if (socket.readyState === socket.OPEN) {
+  if (socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify({ type, ...payload }));
   }
 }
@@ -15,6 +16,12 @@ function roomState(room) {
     status: room.status,
     players: [...room.players.values()],
   };
+}
+
+function broadcastRoom(sockets, roomId, type, payload) {
+  for (const [client, clientState] of sockets) {
+    if (clientState.roomId === roomId) send(client, type, payload);
+  }
 }
 
 function createWebSocketServer(server) {
@@ -66,13 +73,13 @@ function createWebSocketServer(server) {
 
         if (message.type === 'choose_mode') {
           const room = rooms.setPlayerMode(roomId, player.id, message.mode);
-          send(socket, 'lobby_updated', { room: roomState(room) });
+          broadcastRoom(sockets, roomId, 'lobby_updated', { room: roomState(room) });
           return;
         }
 
         if (message.type === 'set_ready') {
           const room = rooms.setPlayerReady(roomId, player.id, message.ready !== false);
-          send(socket, 'lobby_updated', { room: roomState(room) });
+          broadcastRoom(sockets, roomId, 'lobby_updated', { room: roomState(room) });
           return;
         }
 
@@ -85,6 +92,7 @@ function createWebSocketServer(server) {
 
           for (const [client, clientState] of sockets) {
             if (match.players.has(clientState.playerId)) {
+              clientState.roomId = match.id;
               send(client, 'game_room_found', { room: roomState(match) });
             }
           }
@@ -98,7 +106,8 @@ function createWebSocketServer(server) {
     });
 
     socket.on('close', () => {
-      if (roomId) rooms.removePlayer(roomId, player.id);
+      const state = sockets.get(socket);
+      if (state?.roomId) rooms.removePlayer(state.roomId, player.id);
       sockets.delete(socket);
     });
   });
