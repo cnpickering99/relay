@@ -18,9 +18,26 @@ function roomState(room) {
   };
 }
 
+function listRoomsState(rooms) {
+  return [...rooms.values()].map(room => ({
+    roomId: room.id,
+    mode: room.mode || null,
+    status: room.status,
+    players: [...room.players.values()],
+    maxPlayers: Math.max(room.players.size, 2),
+  }));
+}
+
 function broadcastRoom(sockets, roomId, type, payload) {
   for (const [client, clientState] of sockets) {
     if (clientState.roomId === roomId) send(client, type, payload);
+  }
+}
+
+function broadcastRoomList(sockets) {
+  const payload = { rooms: listRoomsState(sockets.getRoomList ? sockets.getRoomList() : new Map()) };
+  for (const [client] of sockets) {
+    send(client, 'rooms_list', payload);
   }
 }
 
@@ -28,6 +45,8 @@ function createWebSocketServer(server) {
   const rooms = new RoomManager();
   const sockets = new Map();
   const websocketServer = new WebSocketServer({ server, path: '/multiplayer' });
+
+  sockets.getRoomList = () => rooms.rooms;
 
   websocketServer.on('connection', socket => {
     const player = { id: crypto.randomUUID(), name: 'Player' };
@@ -46,13 +65,20 @@ function createWebSocketServer(server) {
       }
 
       try {
+        if (message.type === 'list_rooms') {
+          send(socket, 'rooms_list', { rooms: listRoomsState(rooms.rooms) });
+          return;
+        }
+
         if (message.type === 'create_room') {
           const room = rooms.createRoom();
           roomId = room.id;
           player.name = message.name || player.name;
           rooms.joinRoom(roomId, player);
           sockets.get(socket).roomId = roomId;
-          send(socket, 'room_created', { roomId, playerId: player.id, room: roomState(rooms.getRoom(roomId)) });
+          const createdPayload = { roomId, playerId: player.id, room: roomState(rooms.getRoom(roomId)) };
+          send(socket, 'room_created', createdPayload);
+          broadcastRoomList(sockets);
           return;
         }
 
@@ -68,6 +94,7 @@ function createWebSocketServer(server) {
             status: room.status,
             room: roomState(room),
           });
+          broadcastRoomList(sockets);
           return;
         }
 
