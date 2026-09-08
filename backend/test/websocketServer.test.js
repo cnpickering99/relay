@@ -24,8 +24,40 @@ function nextMessage(socket) {
 function connect(url) {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(url);
-    socket.once('open', () => resolve(socket));
-    socket.once('error', reject);
+
+    const onMessage = data => {
+      socket.off('error', onError);
+      resolve({ socket, message: JSON.parse(data.toString()) });
+    };
+
+    const onError = error => {
+      socket.off('message', onMessage);
+      reject(error);
+    };
+
+    socket.once('message', onMessage);
+    socket.once('error', onError);
+  });
+}
+
+function sendAndWait(socket, payload) {
+  return new Promise((resolve, reject) => {
+    const onMessage = data => {
+      cleanup();
+      resolve(JSON.parse(data.toString()));
+    };
+    const onError = error => {
+      cleanup();
+      reject(error);
+    };
+    const cleanup = () => {
+      socket.off('message', onMessage);
+      socket.off('error', onError);
+    };
+
+    socket.once('message', onMessage);
+    socket.once('error', onError);
+    socket.send(JSON.stringify(payload));
   });
 }
 
@@ -48,43 +80,69 @@ describe('multiplayer WebSocket server', () => {
   });
 
   it('supports lobby setup and same-mode queue matching', async () => {
-    const playerOne = await connect(url);
-    const connectedOne = await nextMessage(playerOne);
-    playerOne.send(JSON.stringify({ type: 'create_room', name: 'One' }));
-    const created = await nextMessage(playerOne);
+    const { socket: playerOneSocket, message: connectedOne } = await connect(url);
+    const created = await sendAndWait(playerOneSocket, { type: 'create_room', name: 'One' });
 
-    const playerTwo = await connect(url);
-    await nextMessage(playerTwo);
-    playerTwo.send(JSON.stringify({ type: 'join_room', roomId: created.roomId, name: 'Two' }));
-    const joined = await nextMessage(playerTwo);
+    const { socket: playerTwoSocket, message: secondConnected } = await connect(url);
+    const joined = await sendAndWait(playerTwoSocket, {
+      type: 'join_room',
+      roomId: created.roomId,
+      name: 'Two',
+    });
+
     expect(joined.type).toBe('room_joined');
 
-    playerOne.send(JSON.stringify({ type: 'choose_mode', mode: 'classic' }));
-    expect((await nextMessage(playerOne)).type).toBe('lobby_updated');
-    expect((await nextMessage(playerTwo)).type).toBe('lobby_updated');
+    const oneModePromise = nextMessage(playerOneSocket);
+    const twoModePromise = nextMessage(playerTwoSocket);
+    playerOneSocket.send(JSON.stringify({ type: 'choose_mode', mode: 'classic' }));
+    const [oneModeUpdate, twoModeUpdate] = await Promise.all([oneModePromise, twoModePromise]);
+    expect(oneModeUpdate.type).toBe('lobby_updated');
+    expect(twoModeUpdate.type).toBe('lobby_updated');
 
-    playerTwo.send(JSON.stringify({ type: 'choose_mode', mode: 'classic' }));
-    await nextMessage(playerOne);
-    await nextMessage(playerTwo);
-    playerOne.send(JSON.stringify({ type: 'set_ready', ready: true }));
-    await nextMessage(playerOne);
-    await nextMessage(playerTwo);
-    playerTwo.send(JSON.stringify({ type: 'set_ready', ready: true }));
-    await nextMessage(playerOne);
-    await nextMessage(playerTwo);
+    const secondOneModePromise = nextMessage(playerOneSocket);
+    const secondTwoModePromise = nextMessage(playerTwoSocket);
+    playerTwoSocket.send(JSON.stringify({ type: 'choose_mode', mode: 'classic' }));
+    const [secondOneModeUpdate, secondTwoModeUpdate] = await Promise.all([
+      secondOneModePromise,
+      secondTwoModePromise,
+    ]);
+    expect(secondOneModeUpdate.type).toBe('lobby_updated');
+    expect(secondTwoModeUpdate.type).toBe('lobby_updated');
 
-    playerOne.send(JSON.stringify({ type: 'join_queue' }));
-    expect((await nextMessage(playerOne)).type).toBe('queued');
-    playerTwo.send(JSON.stringify({ type: 'join_queue' }));
-    const matchOne = await nextMessage(playerOne);
-    const matchTwo = await nextMessage(playerTwo);
+    const oneReadyPromise = nextMessage(playerOneSocket);
+    const twoReadyPromise = nextMessage(playerTwoSocket);
+    playerOneSocket.send(JSON.stringify({ type: 'set_ready', ready: true }));
+    const [oneReady, twoReady] = await Promise.all([oneReadyPromise, twoReadyPromise]);
+    expect(oneReady.type).toBe('lobby_updated');
+    expect(twoReady.type).toBe('lobby_updated');
+
+    const secondReadyPromise = nextMessage(playerOneSocket);
+    const secondReadyOtherPromise = nextMessage(playerTwoSocket);
+    playerTwoSocket.send(JSON.stringify({ type: 'set_ready', ready: true }));
+    const [secondReady, secondReadyOther] = await Promise.all([
+      secondReadyPromise,
+      secondReadyOtherPromise,
+    ]);
+    expect(secondReady.type).toBe('lobby_updated');
+    expect(secondReadyOther.type).toBe('lobby_updated');
+
+    const queuedPromise = nextMessage(playerOneSocket);
+    playerOneSocket.send(JSON.stringify({ type: 'join_queue' }));
+    const queuedUpdate = await queuedPromise;
+    expect(queuedUpdate.type).toBe('queued');
+
+    const matchPromiseOne = nextMessage(playerOneSocket);
+    const matchPromiseTwo = nextMessage(playerTwoSocket);
+    playerTwoSocket.send(JSON.stringify({ type: 'join_queue' }));
+    const [matchOne, matchTwo] = await Promise.all([matchPromiseOne, matchPromiseTwo]);
 
     expect(matchOne.type).toBe('game_room_found');
     expect(matchTwo.type).toBe('game_room_found');
     expect(matchOne.room.status).toBe('game');
     expect(matchOne.room.players).toHaveLength(2);
     expect(connectedOne.playerId).toBeTruthy();
-    playerOne.close();
-    playerTwo.close();
+    expect(secondConnected.playerId).toBeTruthy();
+    playerOneSocket.close();
+    playerTwoSocket.close();
   });
 });
