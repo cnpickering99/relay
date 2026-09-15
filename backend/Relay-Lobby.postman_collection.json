@@ -1,0 +1,123 @@
+{
+  "info": {
+    "name": "Relay Backend - Lobby",
+    "description": "WebSocket requests for creating, listing, and joining Relay multiplayer lobbies.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "host",
+      "value": "localhost"
+    },
+    {
+      "key": "port",
+      "value": "3000"
+    },
+    {
+      "key": "roomCode",
+      "value": "TEST01"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://{{host}}:{{port}}/",
+          "protocol": "http",
+          "host": [
+            "{{host}}"
+          ],
+          "port": "{{port}}",
+          "path": [
+            ""
+          ]
+        }
+      }
+    },
+    {
+      "name": "Lobby WebSocket",
+      "description": "Open a new Postman WebSocket request manually using this URL:\n\nws://{{host}}:{{port}}/multiplayer\n\nPostman collections treat WebSocket entries as HTTP requests during import, so this item is documentation-only. After connecting, send the message payloads from the items below in the WebSocket message panel."
+    },
+    {
+      "name": "Create Room Message",
+      "description": "Copy the Body JSON into the Postman WebSocket message panel. Do not send this HTTP template as a regular request.",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"create_room\",\n  \"playerName\": \"Player One\",\n  \"roomName\": \"Test Lobby\",\n  \"maxPlayers\": 4,\n  \"code\": \"TEST01\"\n}"
+        },
+        "url": "http://{{host}}:{{port}}/multiplayer"
+      }
+    },
+    {
+      "name": "List Rooms Message",
+      "description": "Copy the Body JSON into the Postman WebSocket message panel. Do not send this HTTP template as a regular request.",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"list_rooms\"\n}"
+        },
+        "url": "http://{{host}}:{{port}}/multiplayer"
+      }
+    },
+    {
+      "name": "Search Room Message",
+      "description": "Copy the Body JSON into the Postman WebSocket message panel to find a lobby by code without joining it.",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"search_room\",\n  \"roomId\": \"{{roomCode}}\"\n}"
+        },
+        "url": "http://{{host}}:{{port}}/multiplayer"
+      }
+    },
+    {
+      "name": "Join Room Message",
+      "description": "Copy the Body JSON into the Postman WebSocket message panel. Use a roomId returned by list_rooms. Do not send this HTTP template as a regular request.",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"join_room\",\n  \"roomId\": \"{{roomCode}}\",\n  \"name\": \"Player Two\"\n}"
+        },
+        "url": "http://{{host}}:{{port}}/multiplayer"
+      }
+    },
+    {
+      "name": "Delete Room Message",
+      "description": "Copy the Body JSON into the Postman WebSocket message panel. Only the room owner can delete the lobby.",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"delete_room\",\n  \"roomId\": \"{{roomCode}}\"\n}"
+        },
+        "url": "http://{{host}}:{{port}}/multiplayer"
+      }
+    },
+    {
+      "name": "Join Room Via Code Message",
+      "description": "Copy the Body JSON into the Postman WebSocket message panel. This direct code join does not require list_rooms first. Do not send this HTTP template as a regular request.",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"join_room\",\n  \"roomId\": \"{{roomCode}}\",\n  \"name\": \"Player Three\"\n}"
+        },
+        "url": "http://{{host}}:{{port}}/multiplayer"
+      }
+    }
+  ]
+}

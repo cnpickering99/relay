@@ -12,19 +12,20 @@ function send(socket, type, payload = {}) {
 function roomState(room) {
   return {
     roomId: room.id,
-    mode: room.mode || null,
+    name: room.name,
     status: room.status,
-    players: [...room.players.values()],
+    playerCount: room.players.size,
+    maxPlayers: room.maxPlayers,
   };
 }
 
 function listRoomsState(rooms) {
   return [...rooms.values()].map(room => ({
     roomId: room.id,
-    mode: room.mode || null,
+    name: room.name,
     status: room.status,
-    players: [...room.players.values()],
-    maxPlayers: Math.max(room.players.size, 2),
+    playerCount: room.players.size,
+    maxPlayers: room.maxPlayers,
   }));
 }
 
@@ -70,14 +71,38 @@ function createWebSocketServer(server) {
           return;
         }
 
+        if (message.type === 'search_room') {
+          const room = rooms.findRoom(message.roomId || message.code);
+          send(socket, 'room_found', { room: roomState(room) });
+          return;
+        }
+
         if (message.type === 'create_room') {
-          const room = rooms.createRoom();
+          const playerName = message.playerName || message.name || player.name;
+          const room = rooms.createRoom({
+            name: message.roomName ?? playerName,
+            maxPlayers: message.maxPlayers ?? 4,
+            code: message.code,
+            ownerId: player.id,
+          });
           roomId = room.id;
-          player.name = message.name || player.name;
+          player.name = playerName;
           rooms.joinRoom(roomId, player);
           sockets.get(socket).roomId = roomId;
           const createdPayload = { roomId, playerId: player.id, room: roomState(rooms.getRoom(roomId)) };
           send(socket, 'room_created', createdPayload);
+          broadcastRoomList(sockets);
+          return;
+        }
+
+        if (message.type === 'delete_room') {
+          const deletedRoom = rooms.deleteRoom(message.roomId || message.code, player.id);
+          for (const [client, clientState] of sockets) {
+            if (clientState.roomId === deletedRoom.id) {
+              clientState.roomId = null;
+              send(client, 'room_deleted', { roomId: deletedRoom.id });
+            }
+          }
           broadcastRoomList(sockets);
           return;
         }
@@ -95,34 +120,6 @@ function createWebSocketServer(server) {
             room: roomState(room),
           });
           broadcastRoomList(sockets);
-          return;
-        }
-
-        if (message.type === 'choose_mode') {
-          const room = rooms.setPlayerMode(roomId, player.id, message.mode);
-          broadcastRoom(sockets, roomId, 'lobby_updated', { room: roomState(room) });
-          return;
-        }
-
-        if (message.type === 'set_ready') {
-          const room = rooms.setPlayerReady(roomId, player.id, message.ready !== false);
-          broadcastRoom(sockets, roomId, 'lobby_updated', { room: roomState(room) });
-          return;
-        }
-
-        if (message.type === 'join_queue') {
-          const match = rooms.joinQueue(roomId, player.id);
-          if (!match) {
-            send(socket, 'queued', { room: roomState(rooms.getRoom(roomId)) });
-            return;
-          }
-
-          for (const [client, clientState] of sockets) {
-            if (match.players.has(clientState.playerId)) {
-              clientState.roomId = match.id;
-              send(client, 'game_room_found', { room: roomState(match) });
-            }
-          }
           return;
         }
 

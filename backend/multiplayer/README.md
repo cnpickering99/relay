@@ -2,16 +2,16 @@
 
 The multiplayer server uses WebSockets at `/multiplayer` on the same HTTP port as the REST API.
 
-## Lobby and queue messages
+## Lobby messages
 
 ```json
-{ "type": "create_room", "name": "Player 1" }
-{ "type": "join_room", "roomId": "ABC123", "name": "Player 2" }
-{ "type": "choose_mode", "mode": "classic" }
-{ "type": "set_ready", "ready": true }
-{ "type": "join_queue" }
+{ "type": "list_rooms" }
+{ "type": "search_room", "roomId": "ABC123" }
+{ "type": "delete_room", "roomId": "ABC123" }
+{ "type": "create_room", "playerName": "Player 1", "roomName": "Saturday Relay", "maxPlayers": 4, "code": "SAT123" }
+{ "type": "join_room", "roomId": "SAT123", "name": "Player 2" }
 ```
 
-Players first join a lobby, choose a game mode, and mark themselves ready. A ready player then sends `join_queue`. The queue matches players with the same mode and emits `game_room_found` once at least two compatible players are queued. Rooms can contain more than two players.
+The lobby is the room menu. Players can browse open rooms, search for a room by code, create a room, join an open room, enter a room code directly, or delete a room they own. Room summaries expose `playerCount` rather than player details. Room creation supports a display name, a capacity from 2 to 12 players, and an optional unique alphanumeric code. The server owns generated room codes and enforces room capacity.
 
-The lobby accepts players in `lobby` status and changes to `queued` after a player enters matchmaking. The matched room is emitted with `game` status. Word rules, timers, and submissions belong in the game service layer and will be added next.
+Rooms are created in `lobby` status. Game-mode selection, readiness, matchmaking, word rules, timers, and submissions belong to later game-flow services and are not part of the lobby protocol.

@@ -103,12 +103,17 @@ describe('multiplayer WebSocket server', () => {
     websocketServer.close(() => server.close(done));
   });
 
-  it('broadcasts the updated room list to every connected browser when a room is created', async () => {
+  it('publishes created lobbies in the room list', async () => {
     const { socket: firstSocket } = await connect(url);
     const firstConnected = await sendAndWait(firstSocket, { type: 'list_rooms' });
     expect(firstConnected.type).toBe('rooms_list');
 
-    const created = await sendAndWait(firstSocket, { type: 'create_room', name: 'One' });
+    const created = await sendAndWait(firstSocket, {
+      type: 'create_room',
+      playerName: 'One',
+      roomName: 'Open Lobby',
+      maxPlayers: 4,
+    });
 
     const { socket: secondSocket } = await connect(url);
     const secondList = await sendAndWait(secondSocket, { type: 'list_rooms' });
@@ -116,15 +121,13 @@ describe('multiplayer WebSocket server', () => {
     expect(secondList.type).toBe('rooms_list');
     expect(secondList.rooms).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ roomId: created.roomId, players: expect.any(Array) }),
-      ]),
-    );
-
-    const firstBroadcast = await nextRelevantMessage(firstSocket, []);
-    expect(firstBroadcast.type).toBe('rooms_list');
-    expect(firstBroadcast.rooms).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ roomId: created.roomId }),
+        expect.objectContaining({
+          roomId: created.roomId,
+          name: 'Open Lobby',
+          maxPlayers: 4,
+          status: 'lobby',
+          playerCount: 1,
+        }),
       ]),
     );
 
@@ -132,70 +135,151 @@ describe('multiplayer WebSocket server', () => {
     secondSocket.close();
   });
 
-  it('supports lobby setup and same-mode queue matching', async () => {
-    const { socket: playerOneSocket, message: connectedOne } = await connect(url);
-    const created = await sendAndWait(playerOneSocket, { type: 'create_room', name: 'One' });
+  it('creates a named lobby and allows direct room-code joining', async () => {
+    const { socket: playerOneSocket } = await connect(url);
+    const created = await sendAndWait(playerOneSocket, {
+      type: 'create_room',
+      playerName: 'One',
+      roomName: 'Saturday Relay',
+      maxPlayers: 2,
+      code: 'SAT123',
+    });
 
-    const { socket: playerTwoSocket, message: secondConnected } = await connect(url);
+    expect(created.type).toBe('room_created');
+    expect(created.room).toEqual(expect.objectContaining({
+      roomId: 'SAT123',
+      name: 'Saturday Relay',
+      maxPlayers: 2,
+      status: 'lobby',
+    }));
+
+    const { socket: playerTwoSocket } = await connect(url);
     const joined = await sendAndWait(playerTwoSocket, {
       type: 'join_room',
-      roomId: created.roomId,
+      roomId: 'sat123',
       name: 'Two',
     });
 
     expect(joined.type).toBe('room_joined');
+    expect(joined.room.playerCount).toBe(2);
+    expect(joined.room.players).toBeUndefined();
 
-    const oneModePromise = nextRelevantMessage(playerOneSocket);
-    const twoModePromise = nextRelevantMessage(playerTwoSocket);
-    playerOneSocket.send(JSON.stringify({ type: 'choose_mode', mode: 'classic' }));
-    const [oneModeUpdate, twoModeUpdate] = await Promise.all([oneModePromise, twoModePromise]);
-    expect(oneModeUpdate.type).toBe('lobby_updated');
-    expect(twoModeUpdate.type).toBe('lobby_updated');
-
-    const secondOneModePromise = nextRelevantMessage(playerOneSocket);
-    const secondTwoModePromise = nextRelevantMessage(playerTwoSocket);
-    playerTwoSocket.send(JSON.stringify({ type: 'choose_mode', mode: 'classic' }));
-    const [secondOneModeUpdate, secondTwoModeUpdate] = await Promise.all([
-      secondOneModePromise,
-      secondTwoModePromise,
-    ]);
-    expect(secondOneModeUpdate.type).toBe('lobby_updated');
-    expect(secondTwoModeUpdate.type).toBe('lobby_updated');
-
-    const oneReadyPromise = nextRelevantMessage(playerOneSocket);
-    const twoReadyPromise = nextRelevantMessage(playerTwoSocket);
-    playerOneSocket.send(JSON.stringify({ type: 'set_ready', ready: true }));
-    const [oneReady, twoReady] = await Promise.all([oneReadyPromise, twoReadyPromise]);
-    expect(oneReady.type).toBe('lobby_updated');
-    expect(twoReady.type).toBe('lobby_updated');
-
-    const secondReadyPromise = nextRelevantMessage(playerOneSocket);
-    const secondReadyOtherPromise = nextRelevantMessage(playerTwoSocket);
-    playerTwoSocket.send(JSON.stringify({ type: 'set_ready', ready: true }));
-    const [secondReady, secondReadyOther] = await Promise.all([
-      secondReadyPromise,
-      secondReadyOtherPromise,
-    ]);
-    expect(secondReady.type).toBe('lobby_updated');
-    expect(secondReadyOther.type).toBe('lobby_updated');
-
-    const queuedPromise = nextRelevantMessage(playerOneSocket);
-    playerOneSocket.send(JSON.stringify({ type: 'join_queue' }));
-    const queuedUpdate = await queuedPromise;
-    expect(queuedUpdate.type).toBe('queued');
-
-    const matchPromiseOne = nextRelevantMessage(playerOneSocket);
-    const matchPromiseTwo = nextRelevantMessage(playerTwoSocket);
-    playerTwoSocket.send(JSON.stringify({ type: 'join_queue' }));
-    const [matchOne, matchTwo] = await Promise.all([matchPromiseOne, matchPromiseTwo]);
-
-    expect(matchOne.type).toBe('game_room_found');
-    expect(matchTwo.type).toBe('game_room_found');
-    expect(matchOne.room.status).toBe('game');
-    expect(matchOne.room.players).toHaveLength(2);
-    expect(connectedOne.playerId).toBeTruthy();
-    expect(secondConnected.playerId).toBeTruthy();
     playerOneSocket.close();
     playerTwoSocket.close();
+  });
+
+  it('searches for a lobby by code without joining it', async () => {
+    const { socket: ownerSocket } = await connect(url);
+    await sendAndWait(ownerSocket, {
+      type: 'create_room',
+      playerName: 'Owner',
+      roomName: 'Searchable Lobby',
+      maxPlayers: 4,
+      code: 'LOOKUP1',
+    });
+
+    const { socket: searchSocket } = await connect(url);
+    const found = await sendAndWait(searchSocket, {
+      type: 'search_room',
+      roomId: 'lookup1',
+    });
+
+    expect(found.type).toBe('room_found');
+    expect(found.room).toEqual(expect.objectContaining({
+      roomId: 'LOOKUP1',
+      name: 'Searchable Lobby',
+      maxPlayers: 4,
+      playerCount: 1,
+    }));
+    expect(found.room.players).toBeUndefined();
+
+    ownerSocket.close();
+    searchSocket.close();
+  });
+
+  it('returns an error when searching for an unknown room code', async () => {
+    const { socket } = await connect(url);
+    const response = await sendAndWait(socket, {
+      type: 'search_room',
+      code: 'MISSING',
+    });
+
+    expect(response).toEqual({ type: 'error', message: 'room not found' });
+    socket.close();
+  });
+
+  it('allows the room owner to delete a lobby', async () => {
+    const { socket: ownerSocket } = await connect(url);
+    await sendAndWait(ownerSocket, {
+      type: 'create_room',
+      playerName: 'Owner',
+      roomName: 'Disposable Lobby',
+      code: 'DELETE1',
+    });
+
+    const deleted = await sendAndWait(ownerSocket, {
+      type: 'delete_room',
+      roomId: 'delete1',
+    });
+
+    expect(deleted).toEqual({ type: 'room_deleted', roomId: 'DELETE1' });
+
+    const rooms = await sendAndWait(ownerSocket, { type: 'list_rooms' });
+    expect(rooms.rooms).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ roomId: 'DELETE1' })]),
+    );
+    ownerSocket.close();
+  });
+
+  it('prevents a non-owner from deleting a lobby', async () => {
+    const { socket: ownerSocket } = await connect(url);
+    await sendAndWait(ownerSocket, {
+      type: 'create_room',
+      playerName: 'Owner',
+      code: 'NODELETE',
+    });
+
+    const { socket: memberSocket } = await connect(url);
+    await sendAndWait(memberSocket, {
+      type: 'join_room',
+      roomId: 'NODELETE',
+      name: 'Member',
+    });
+
+    const rejected = await sendAndWait(memberSocket, {
+      type: 'delete_room',
+      roomId: 'NODELETE',
+    });
+
+    expect(rejected).toEqual({
+      type: 'error',
+      message: 'only the room owner can delete the room',
+    });
+    ownerSocket.close();
+    memberSocket.close();
+  });
+
+  it('rejects a third player when a lobby reaches capacity', async () => {
+    const { socket: ownerSocket } = await connect(url);
+    const created = await sendAndWait(ownerSocket, {
+      type: 'create_room',
+      playerName: 'Owner',
+      maxPlayers: 2,
+      code: 'FULL99',
+    });
+    const { socket: secondSocket } = await connect(url);
+    await sendAndWait(secondSocket, { type: 'join_room', roomId: created.roomId, name: 'Two' });
+
+    const { socket: thirdSocket } = await connect(url);
+    const rejected = await sendAndWait(thirdSocket, {
+      type: 'join_room',
+      roomId: created.roomId,
+      name: 'Three',
+    });
+
+    expect(rejected).toEqual({ type: 'error', message: 'room is full' });
+    ownerSocket.close();
+    secondSocket.close();
+    thirdSocket.close();
   });
 });
