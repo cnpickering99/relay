@@ -1,7 +1,7 @@
 const WebSocket = require('ws');
 const { WebSocketServer } = WebSocket;
 const crypto = require('crypto');
-const RoomManager = require('./roomManager');
+const LobbyManager = require('./lobbyManager');
 
 function send(socket, type, payload = {}) {
   if (socket.readyState === WebSocket.OPEN) {
@@ -50,7 +50,7 @@ function ensurePlayerIsNotInRoom(sockets, socket) {
 }
 
 function createWebSocketServer(server) {
-  const rooms = new RoomManager();
+  const rooms = new LobbyManager();
   const sockets = new Map();
   const websocketServer = new WebSocketServer({ server, path: '/multiplayer' });
 

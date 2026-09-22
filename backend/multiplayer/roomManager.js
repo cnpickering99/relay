@@ -1,94 +1,104 @@
-const crypto = require('crypto');
-const { GameStatus } = require('./enums');
-
 class RoomManager {
-  constructor() {
-    this.rooms = new Map();
-  }
+	constructor(room) {
+		if (!room || (!Array.isArray(room.players) && !(room.players instanceof Map))) {
+			throw new Error('room with a player list is required');
+		}
 
-  createRoom({ name = 'Lobby', maxPlayers = 4, code, ownerId } = {}) {
-    if (ownerId && [...this.rooms.values()].some(room => room.ownerId === ownerId)) {
-      throw new Error('player already owns a room');
-    }
+		this.room = room;
+		this.room.code ??= this.room.id;
+		this.room.type_of_game ??= 1;
+		const players = this.room.players instanceof Map
+			? [...this.room.players.values()]
+			: this.room.players;
+		this.room.players = players.map(playerEntry => this.normalizePlayer(playerEntry));
+	}
 
-    const roomId = this.createRoomId(code);
+	leaveRoom(playerId) {
+		this.requirePlayer(playerId);
+		this.room.players = this.room.players.filter(entry => entry.player.id !== playerId);
 
-    const room = {
-      id: roomId,
-      ownerId,
-      name: String(name).trim() || 'Lobby',
-      maxPlayers: this.normalizeMaxPlayers(maxPlayers),
-      status: GameStatus.LOBBY,
-      players: new Map(),
-      game: null,
-    };
-    this.rooms.set(roomId, room);
-    return room;
-  }
+		if (this.room.ownerId === playerId) {
+			this.room.ownerId = this.room.players[0]?.player.id;
+		}
 
-  createRoomId(code) {
-    const requestedCode = code ? String(code).trim().toUpperCase() : '';
-    if (requestedCode && !/^[A-Z0-9]{3,12}$/.test(requestedCode)) {
-      throw new Error('room code must be 3 to 12 letters or numbers');
-    }
+		return this.getRoomState();
+	}
 
-    if (requestedCode) {
-      if (this.rooms.has(requestedCode)) throw new Error('room code is already in use');
-      return requestedCode;
-    }
+	setReady(playerId, ready = true) {
+		const playerEntry = this.requirePlayer(playerId);
+		playerEntry.status = ready ? 'ready' : 'not_ready';
 
-    let roomId;
-    do {
-      roomId = crypto.randomBytes(3).toString('hex').toUpperCase();
-    } while (this.rooms.has(roomId));
-    return roomId;
-  }
+		return {
+			playerId,
+			status: playerEntry.status,
+		};
+	}
 
-  normalizeMaxPlayers(maxPlayers) {
-    const value = Number(maxPlayers);
-    if (!Number.isInteger(value) || value < 2 || value > 12) {
-      throw new Error('room capacity must be between 2 and 12 players');
-    }
-    return value;
-  }
+	getRoomCode() {
+		return this.room.code;
+	}
 
-  getRoom(roomId) {
-    return this.rooms.get(String(roomId).toUpperCase());
-  }
+	getRoomState() {
+		return {
+			code: this.room.code,
+			name: this.room.name,
+			ownerId: this.room.ownerId,
+			players: this.getPlayerList(),
+			status: this.room.status,
+			playerCount: this.room.players.length,
+			maxPlayers: this.room.maxPlayers,
+			type_of_game: this.room.type_of_game,
+			roomId: this.room.id,
+		};
+	}
 
-  findRoom(roomId) {
-    const room = this.getRoom(roomId);
-    if (!room) throw new Error('room not found');
-    return room;
-  }
+	getPlayerList() {
+		return this.room.players.map(entry => ({
+			player: entry.player,
+			status: entry.status,
+			score: entry.score,
+			isOwner: entry.player.id === this.room.ownerId,
+		}));
+	}
 
-  joinRoom(roomId, player) {
-    const room = this.findRoom(roomId);
-    if (!player || !player.id) throw new Error('player id is required');
-    if (room.players.has(player.id)) return room;
-    if (room.status !== GameStatus.LOBBY) throw new Error('room is no longer accepting players');
-    if (room.players.size >= room.maxPlayers) throw new Error('room is full');
+	managePlayer(ownerId, targetPlayerId, action) {
+		if (ownerId !== this.room.ownerId) {
+			throw new Error('only the room owner can manage players');
+		}
 
-    room.players.set(player.id, player);
-    return room;
-  }
+		if (action !== 'kick') {
+			throw new Error('unsupported player management action');
+		}
 
-  deleteRoom(roomId, requesterId) {
-    const room = this.findRoom(roomId);
-    if (room.ownerId !== requesterId) throw new Error('only the room owner can delete the room');
+		if (targetPlayerId === ownerId) {
+			throw new Error('room owner cannot be kicked');
+		}
 
-    this.rooms.delete(room.id);
-    return room;
-  }
+		this.requirePlayer(targetPlayerId);
+		this.room.players = this.room.players.filter(entry => entry.player.id !== targetPlayerId);
+		return this.getRoomState();
+	}
 
-  removePlayer(roomId, playerId) {
-    const room = this.getRoom(roomId);
-    if (!room) return;
+	normalizePlayer(playerEntry) {
+		const player = playerEntry.player ?? playerEntry;
+		const status = playerEntry.status ?? (player.ready ? 'ready' : 'not_ready');
+		const score = playerEntry.score ?? player.score ?? 0;
 
-    room.players.delete(playerId);
-    if (room.players.size === 0) this.rooms.delete(room.id);
-  }
+		if (!player.id) {
+			throw new Error('player id is required');
+		}
+
+		return { player, status, score };
+	}
+
+	requirePlayer(playerId) {
+		const playerEntry = this.room.players.find(entry => entry.player.id === playerId);
+		if (!playerEntry) {
+			throw new Error('player is not in the room');
+		}
+
+		return playerEntry;
+	}
 }
 
 module.exports = RoomManager;
-module.exports.GameStatus = GameStatus;

@@ -1,5 +1,5 @@
 const { GameStatus } = require('../multiplayer/enums');
-const RoomManager = require('../multiplayer/roomManager');
+const LobbyManager = require('../multiplayer/lobbyManager');
 
 describe('GameStatus', () => {
   it('defines the supported room states', () => {
@@ -13,15 +13,15 @@ describe('GameStatus', () => {
   });
 });
 
-describe('RoomManager lobby lifecycle', () => {
+describe('LobbyManager lobby lifecycle', () => {
   it('creates rooms in the lobby state', () => {
-    const rooms = new RoomManager();
+    const rooms = new LobbyManager();
     const room = rooms.createRoom();
     expect(room.status).toBe(GameStatus.LOBBY);
   });
 
   it('stores the lobby name, capacity, and custom code', () => {
-    const rooms = new RoomManager();
+    const rooms = new LobbyManager();
     const room = rooms.createRoom({ name: 'Weekend Game', maxPlayers: 6, code: 'WEEK01' });
 
     expect(room).toEqual(expect.objectContaining({
@@ -33,14 +33,14 @@ describe('RoomManager lobby lifecycle', () => {
   });
 
   it('allows an owner to create only one room', () => {
-    const rooms = new RoomManager();
+    const rooms = new LobbyManager();
     rooms.createRoom({ ownerId: 'player-1' });
 
     expect(() => rooms.createRoom({ ownerId: 'player-1' })).toThrow('player already owns a room');
   });
 
   it('rejects players after the lobby reaches capacity', () => {
-    const rooms = new RoomManager();
+    const rooms = new LobbyManager();
     const room = rooms.createRoom({ maxPlayers: 2 });
 
     rooms.joinRoom(room.id, { id: 'p1' });
