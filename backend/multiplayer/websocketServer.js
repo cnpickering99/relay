@@ -26,6 +26,7 @@ function listRoomsState(rooms) {
     status: room.status,
     playerCount: room.players.size,
     maxPlayers: room.maxPlayers,
+    owner: room.owner
   }));
 }
 
@@ -39,6 +40,12 @@ function broadcastRoomList(sockets) {
   const payload = { rooms: listRoomsState(sockets.getRoomList ? sockets.getRoomList() : new Map()) };
   for (const [client] of sockets) {
     send(client, 'rooms_list', payload);
+  }
+}
+
+function ensurePlayerIsNotInRoom(sockets, socket) {
+  if (sockets.get(socket)?.roomId) {
+    throw new Error('player is already in a room');
   }
 }
 
@@ -78,7 +85,8 @@ function createWebSocketServer(server) {
         }
 
         if (message.type === 'create_room') {
-          const playerName = message.playerName || message.name || player.name;
+          ensurePlayerIsNotInRoom(sockets, socket);
+          const playerName = message.owner || message.playerName || message.name || player.name;
           const room = rooms.createRoom({
             name: message.roomName ?? playerName,
             maxPlayers: message.maxPlayers ?? 4,
@@ -108,6 +116,7 @@ function createWebSocketServer(server) {
         }
 
         if (message.type === 'join_room') {
+          ensurePlayerIsNotInRoom(sockets, socket);
           player.name = message.name || player.name;
           roomId = String(message.roomId || '').toUpperCase();
           const room = rooms.joinRoom(roomId, player);

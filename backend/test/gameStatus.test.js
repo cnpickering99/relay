@@ -32,6 +32,13 @@ describe('RoomManager lobby lifecycle', () => {
     }));
   });
 
+  it('allows an owner to create only one room', () => {
+    const rooms = new RoomManager();
+    rooms.createRoom({ ownerId: 'player-1' });
+
+    expect(() => rooms.createRoom({ ownerId: 'player-1' })).toThrow('player already owns a room');
+  });
+
   it('rejects players after the lobby reaches capacity', () => {
     const rooms = new RoomManager();
     const room = rooms.createRoom({ maxPlayers: 2 });

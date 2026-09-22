@@ -7,6 +7,10 @@ class RoomManager {
   }
 
   createRoom({ name = 'Lobby', maxPlayers = 4, code, ownerId } = {}) {
+    if (ownerId && [...this.rooms.values()].some(room => room.ownerId === ownerId)) {
+      throw new Error('player already owns a room');
+    }
+
     const roomId = this.createRoomId(code);
 
     const room = {

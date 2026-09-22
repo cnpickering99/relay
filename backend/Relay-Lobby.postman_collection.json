@@ -49,7 +49,7 @@
         "header": [],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"type\": \"create_room\",\n  \"playerName\": \"Player One\",\n  \"roomName\": \"Test Lobby\",\n  \"maxPlayers\": 4,\n  \"code\": \"TEST01\"\n}"
+          "raw": "{\n  \"type\": \"create_room\",\n  \"playerName\": \"Player One\",\n  \"owner\": \"Player One\",\n  \"roomName\": \"Test Lobby\",\n  \"maxPlayers\": 4,\n  \"code\": \"TEST01\"\n}"
         },
         "url": "http://{{host}}:{{port}}/multiplayer"
       }

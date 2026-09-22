@@ -168,6 +168,76 @@ describe('multiplayer WebSocket server', () => {
     playerTwoSocket.close();
   });
 
+  it('prevents one player from creating more than one lobby', async () => {
+    const { socket } = await connect(url);
+    await sendAndWait(socket, {
+      type: 'create_room',
+      owner: 'Owner',
+      code: 'ONEONLY',
+    });
+
+    const rejected = await sendAndWait(socket, {
+      type: 'create_room',
+      owner: 'Owner',
+      code: 'SECOND1',
+    });
+
+    expect(rejected).toEqual({ type: 'error', message: 'player is already in a room' });
+    socket.close();
+  });
+
+  it('prevents a room member from joining another lobby', async () => {
+    const { socket: ownerSocket } = await connect(url);
+    await sendAndWait(ownerSocket, {
+      type: 'create_room',
+      owner: 'Owner',
+      code: 'MEMBER1',
+    });
+
+    const { socket: otherSocket } = await connect(url);
+    await sendAndWait(otherSocket, {
+      type: 'create_room',
+      owner: 'Other',
+      code: 'MEMBER2',
+    });
+
+    const rejected = await sendAndWait(otherSocket, {
+      type: 'join_room',
+      roomId: 'MEMBER1',
+      name: 'Other',
+    });
+
+    expect(rejected).toEqual({ type: 'error', message: 'player is already in a room' });
+    ownerSocket.close();
+    otherSocket.close();
+  });
+
+  it('prevents a room member from creating another lobby', async () => {
+    const { socket: ownerSocket } = await connect(url);
+    await sendAndWait(ownerSocket, {
+      type: 'create_room',
+      owner: 'Owner',
+      code: 'JOINED1',
+    });
+
+    const { socket: memberSocket } = await connect(url);
+    await sendAndWait(memberSocket, {
+      type: 'join_room',
+      roomId: 'JOINED1',
+      name: 'Member',
+    });
+
+    const rejected = await sendAndWait(memberSocket, {
+      type: 'create_room',
+      owner: 'Member',
+      code: 'JOINED2',
+    });
+
+    expect(rejected).toEqual({ type: 'error', message: 'player is already in a room' });
+    ownerSocket.close();
+    memberSocket.close();
+  });
+
   it('searches for a lobby by code without joining it', async () => {
     const { socket: ownerSocket } = await connect(url);
     await sendAndWait(ownerSocket, {

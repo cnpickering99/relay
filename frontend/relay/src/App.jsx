@@ -252,6 +252,7 @@ function App() {
       socketRef.current.send(JSON.stringify({
         type: 'create_room',
         name,
+        owner: name,
       }))
       showToast('Creating room...', 'success')
       return
