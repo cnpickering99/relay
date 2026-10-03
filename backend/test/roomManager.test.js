@@ -44,13 +44,21 @@ describe('RoomManager', () => {
 
     expect(manager.setReady('p2')).toEqual({ playerId: 'p2', status: 'ready' });
     expect(manager.room.players[1].status).toBe('ready');
+    expect(manager.setReady('p2', false)).toEqual({ playerId: 'p2', status: 'not_ready' });
+    expect(manager.room.players[1].status).toBe('not_ready');
     expect(manager.getPlayerList()).toEqual(expect.arrayContaining([
       expect.objectContaining({
         player: expect.objectContaining({ id: 'p2' }),
-        status: 'ready',
+        status: 'not_ready',
         score: 0,
       }),
     ]));
+  });
+
+  it('rejects ready updates for players outside the room', () => {
+    const manager = new RoomManager(createRoom());
+
+    expect(() => manager.setReady('missing')).toThrow('player is not in the room');
   });
 
   it('removes a player and transfers ownership when the owner leaves', () => {

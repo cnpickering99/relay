@@ -18,6 +18,7 @@ describe('LobbyManager lobby lifecycle', () => {
     const rooms = new LobbyManager();
     const room = rooms.createRoom();
     expect(room.status).toBe(GameStatus.LOBBY);
+    expect(room.code).toBe(room.id);
   });
 
   it('stores the lobby name, capacity, and custom code', () => {
@@ -26,6 +27,7 @@ describe('LobbyManager lobby lifecycle', () => {
 
     expect(room).toEqual(expect.objectContaining({
       id: 'WEEK01',
+      code: 'WEEK01',
       name: 'Weekend Game',
       maxPlayers: 6,
       status: GameStatus.LOBBY,
@@ -47,5 +49,28 @@ describe('LobbyManager lobby lifecycle', () => {
     rooms.joinRoom(room.id, { id: 'p2' });
 
     expect(() => rooms.joinRoom(room.id, { id: 'p3' })).toThrow('room is full');
+  });
+
+  it('delegates player removal and supports later joins after normalization', () => {
+    const rooms = new LobbyManager();
+    const room = rooms.createRoom({ ownerId: 'p1' });
+    rooms.joinRoom(room.id, { id: 'p1', name: 'Owner' });
+    rooms.joinRoom(room.id, { id: 'p2', name: 'Player Two' });
+
+    const state = rooms.removePlayer(room.id, 'p1');
+
+    expect(state.ownerId).toBe('p2');
+    expect(state.playerCount).toBe(1);
+    expect(room.players).toEqual([
+      expect.objectContaining({ player: expect.objectContaining({ id: 'p2' }) }),
+    ]);
+
+    rooms.joinRoom(room.id, { id: 'p3', name: 'Player Three' });
+    expect(room.players).toHaveLength(2);
+    expect(room.players[1]).toEqual({
+      player: { id: 'p3', name: 'Player Three' },
+      status: 'not_ready',
+      score: 0,
+    });
   });
 });

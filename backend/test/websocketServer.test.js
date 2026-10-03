@@ -168,6 +168,42 @@ describe('multiplayer WebSocket server', () => {
     playerTwoSocket.close();
   });
 
+  it('allows room discovery and joining after an owner disconnects', async () => {
+    const { socket: ownerSocket } = await connect(url);
+    await sendAndWait(ownerSocket, {
+      type: 'create_room',
+      owner: 'Owner',
+      code: 'REJOIN1',
+    });
+
+    const { socket: remainingSocket } = await connect(url);
+    await sendAndWait(remainingSocket, {
+      type: 'join_room',
+      roomId: 'REJOIN1',
+      name: 'Remaining',
+    });
+
+    const ownerDisconnected = new Promise(resolve => ownerSocket.once('close', resolve));
+    ownerSocket.close();
+    await ownerDisconnected;
+
+    const { socket: joiningSocket } = await connect(url);
+    const roomList = await sendAndWait(joiningSocket, { type: 'list_rooms' });
+    expect(roomList.rooms).toEqual(expect.arrayContaining([
+      expect.objectContaining({ roomId: 'REJOIN1', playerCount: 1 }),
+    ]));
+
+    const joined = await sendAndWait(joiningSocket, {
+      type: 'join_room',
+      roomId: 'REJOIN1',
+      name: 'New Player',
+    });
+    expect(joined.room.playerCount).toBe(2);
+
+    remainingSocket.close();
+    joiningSocket.close();
+  });
+
   it('prevents one player from creating more than one lobby', async () => {
     const { socket } = await connect(url);
     await sendAndWait(socket, {

@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { GameStatus } = require('./enums');
+const RoomManager = require('./roomManager');
 
 class LobbyManager {
   constructor() {
@@ -15,6 +16,7 @@ class LobbyManager {
 
     const room = {
       id: roomId,
+      code: roomId,
       ownerId,
       name: String(name).trim() || 'Lobby',
       maxPlayers: this.normalizeMaxPlayers(maxPlayers),
@@ -65,11 +67,20 @@ class LobbyManager {
   joinRoom(roomId, player) {
     const room = this.findRoom(roomId);
     if (!player || !player.id) throw new Error('player id is required');
-    if (room.players.has(player.id)) return room;
+    const playersAreMapped = room.players instanceof Map;
+    const existingPlayer = playersAreMapped
+      ? room.players.has(player.id)
+      : room.players.some(entry => (entry.player ?? entry).id === player.id);
+    if (existingPlayer) return room;
     if (room.status !== GameStatus.LOBBY) throw new Error('room is no longer accepting players');
-    if (room.players.size >= room.maxPlayers) throw new Error('room is full');
+    const playerCount = playersAreMapped ? room.players.size : room.players.length;
+    if (playerCount >= room.maxPlayers) throw new Error('room is full');
 
-    room.players.set(player.id, player);
+    if (playersAreMapped) {
+      room.players.set(player.id, player);
+    } else {
+      room.players.push({ player, status: 'not_ready', score: 0 });
+    }
     return room;
   }
 
@@ -85,8 +96,9 @@ class LobbyManager {
     const room = this.getRoom(roomId);
     if (!room) return;
 
-    room.players.delete(playerId);
-    if (room.players.size === 0) this.rooms.delete(room.id);
+    const updatedRoom = new RoomManager(room).leaveRoom(playerId);
+    if (updatedRoom.playerCount === 0) this.rooms.delete(room.id);
+    return updatedRoom;
   }
 }
 

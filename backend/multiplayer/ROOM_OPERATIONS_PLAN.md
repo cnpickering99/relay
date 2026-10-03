@@ -31,6 +31,8 @@ The player `status` replaces the separate `readyPlayers` collection. A player is
 
 ## Step 1: Separate Room Manager
 
+Status: Complete.
+
 1. Keep `lobbyManager.js` responsible for lobby lifecycle operations.
 2. Keep `roomManager.js` responsible for operations inside an existing room.
 3. Keep the room manager in the `backend/multiplayer` folder.
@@ -56,6 +58,8 @@ Status: Complete.
 5. Return the updated room state.
 
 ## Step 4: Ready Status
+
+Status: Complete.
 
 1. Confirm the player belongs to the room.
 2. Set the player's status to `ready` or `not_ready`.

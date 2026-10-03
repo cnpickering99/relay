@@ -3,6 +3,10 @@ const { WebSocketServer } = WebSocket;
 const crypto = require('crypto');
 const LobbyManager = require('./lobbyManager');
 
+function playerCount(room) {
+  return room.players instanceof Map ? room.players.size : room.players.length;
+}
+
 function send(socket, type, payload = {}) {
   if (socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify({ type, ...payload }));
@@ -14,7 +18,7 @@ function roomState(room) {
     roomId: room.id,
     name: room.name,
     status: room.status,
-    playerCount: room.players.size,
+    playerCount: playerCount(room),
     maxPlayers: room.maxPlayers,
   };
 }
@@ -24,7 +28,7 @@ function listRoomsState(rooms) {
     roomId: room.id,
     name: room.name,
     status: room.status,
-    playerCount: room.players.size,
+    playerCount: playerCount(room),
     maxPlayers: room.maxPlayers,
     owner: room.owner
   }));
@@ -124,7 +128,7 @@ function createWebSocketServer(server) {
           send(socket, 'room_joined', {
             roomId: room.id,
             playerId: player.id,
-            playerCount: room.players.size,
+            playerCount: playerCount(room),
             status: room.status,
             room: roomState(room),
           });
