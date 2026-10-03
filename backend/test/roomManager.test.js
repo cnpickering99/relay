@@ -20,11 +20,19 @@ describe('RoomManager', () => {
     const manager = new RoomManager(createRoom());
 
     expect(manager.getRoomCode()).toBe('TEST01');
-    expect(manager.getRoomState()).toEqual(expect.objectContaining({
+    const roomState = manager.getRoomState();
+    expect(roomState).toEqual(expect.objectContaining({
       code: 'TEST01',
+      name: 'Test Lobby',
+      ownerId: 'p1',
       type_of_game: 1,
+      status: 'lobby',
       playerCount: 2,
+      maxPlayers: 4,
     }));
+    expect(roomState).not.toHaveProperty('roomId');
+    expect(roomState.players).toEqual(expect.any(Array));
+    expect(roomState.players).not.toBe(manager.room.players);
     expect(manager.room.players).toEqual([
       expect.objectContaining({
         player: expect.objectContaining({ id: 'p1' }),
@@ -37,6 +45,37 @@ describe('RoomManager', () => {
         score: 0,
       }),
     ]);
+  });
+
+  it('normalizes legacy player data and isolates public player views', () => {
+    const room = {
+      id: 'ROOM2',
+      players: new Map([
+        ['p1', { id: 'p1', name: 'Ready Player', ready: true, score: 12, token: 'private' }],
+        ['p2', {
+          player: { id: 'p2', name: 'Player Two', token: 'private' },
+          status: 'ready',
+          score: 4,
+        }],
+      ]),
+    };
+    const manager = new RoomManager(room);
+
+    expect(room.code).toBe('ROOM2');
+    expect(room.type_of_game).toBe(1);
+    expect(room.players).toEqual([
+      { player: { id: 'p1', name: 'Ready Player' }, status: 'ready', score: 12 },
+      { player: { id: 'p2', name: 'Player Two' }, status: 'ready', score: 4 },
+    ]);
+
+    const publicState = manager.getRoomState();
+    publicState.players[0].player.name = 'Changed externally';
+    expect(manager.room.players[0].player.name).toBe('Ready Player');
+    expect(publicState.players[0].player.token).toBeUndefined();
+  });
+
+  it('requires a room code when neither code nor id is available', () => {
+    expect(() => new RoomManager({ players: [] })).toThrow('room code is required');
   });
 
   it('updates ready state for a room player', () => {

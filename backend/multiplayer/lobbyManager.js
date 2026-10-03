@@ -23,6 +23,7 @@ class LobbyManager {
       status: GameStatus.LOBBY,
       players: new Map(),
       game: null,
+      type_of_game: 1
     };
     this.rooms.set(roomId, room);
     return room;

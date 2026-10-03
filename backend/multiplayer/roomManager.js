@@ -5,7 +5,10 @@ class RoomManager {
 		}
 
 		this.room = room;
-		this.room.code ??= this.room.id;
+		this.room.code ||= this.room.id;
+		if (!this.room.code) {
+			throw new Error('room code is required');
+		}
 		this.room.type_of_game ??= 1;
 		const players = this.room.players instanceof Map
 			? [...this.room.players.values()]
@@ -48,13 +51,12 @@ class RoomManager {
 			playerCount: this.room.players.length,
 			maxPlayers: this.room.maxPlayers,
 			type_of_game: this.room.type_of_game,
-			roomId: this.room.id,
 		};
 	}
 
 	getPlayerList() {
 		return this.room.players.map(entry => ({
-			player: entry.player,
+			player: { id: entry.player.id, name: entry.player.name },
 			status: entry.status,
 			score: entry.score,
 			isOwner: entry.player.id === this.room.ownerId,
@@ -80,15 +82,26 @@ class RoomManager {
 	}
 
 	normalizePlayer(playerEntry) {
+		if (!playerEntry || typeof playerEntry !== 'object') {
+			throw new Error('player entry is required');
+		}
+
 		const player = playerEntry.player ?? playerEntry;
 		const status = playerEntry.status ?? (player.ready ? 'ready' : 'not_ready');
 		const score = playerEntry.score ?? player.score ?? 0;
 
-		if (!player.id) {
+		if (!player || typeof player !== 'object' || !player.id) {
 			throw new Error('player id is required');
 		}
+		if (status !== 'ready' && status !== 'not_ready') {
+			throw new Error('player status must be ready or not_ready');
+		}
 
-		return { player, status, score };
+		return {
+			player: { id: player.id, name: player.name },
+			status,
+			score,
+		};
 	}
 
 	requirePlayer(playerId) {

@@ -40,12 +40,13 @@ Status: Complete.
 
 ## Step 2: Normalize Room State
 
+Status: Complete.
+
 1. Accept the room created by the lobby manager.
 2. Ensure the room has a code and `type_of_game` value.
-3. Convert existing player map data into the room `players` array.
-4. Normalize every player entry with a player object, status, and score.
-5. Use `not_ready` and score `0` as defaults.
-6. Return public room state without exposing internal collections.
+3. Normalize every player entry with a player object, status, and score.
+4. Use `not_ready` and score `0` as defaults.
+5. Return public room state without exposing internal collections.
 
 ## Step 3: Leave a Room
 
@@ -67,6 +68,8 @@ Status: Complete.
 4. Later, use these statuses to determine whether a game can start.
 
 ## Step 5: Room and Code Views
+
+Status: Complete.
 
 1. Provide a room-code accessor.
 2. Provide a public room-state view.
