@@ -38,3 +38,21 @@ Join Room W/ code:
   "roomId": "{{roomCode}}",
   "name": "Player Three"
 }
+
+Ready:
+{"type":"set_ready","ready":true}
+
+Un-Ready:
+{"type":"set_ready","ready":false}
+
+Leave Room:
+{"type":"leave_room"}
+
+Get Room:
+{"type":"get_room"}
+
+Get Players:
+{"type":"get_players"}
+
+Manage Player (owner only):
+{"type":"manage_player","action":"kick","targetPlayerId":"{{playerId}}"}

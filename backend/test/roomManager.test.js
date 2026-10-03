@@ -74,6 +74,34 @@ describe('RoomManager', () => {
     expect(publicState.players[0].player.token).toBeUndefined();
   });
 
+  it('returns a safe player list with identity, status, score, and owner state', () => {
+    const manager = new RoomManager(createRoom());
+    manager.room.players[1].status = 'ready';
+    manager.room.players[1].score = 9;
+
+    const playerList = manager.getPlayerList();
+
+    expect(playerList).toEqual([
+      {
+        player: { id: 'p1', name: 'Owner' },
+        status: 'not_ready',
+        score: 0,
+        isOwner: true,
+      },
+      {
+        player: { id: 'p2', name: 'Player Two' },
+        status: 'ready',
+        score: 9,
+        isOwner: false,
+      },
+    ]);
+    expect(playerList).not.toBe(manager.room.players);
+    expect(playerList[0].player).not.toBe(manager.room.players[0].player);
+
+    playerList[0].player.name = 'Changed externally';
+    expect(manager.room.players[0].player.name).toBe('Owner');
+  });
+
   it('requires a room code when neither code nor id is available', () => {
     expect(() => new RoomManager({ players: [] })).toThrow('room code is required');
   });
@@ -146,11 +174,31 @@ describe('RoomManager', () => {
 
   it('allows only the owner to kick a player', () => {
     const manager = new RoomManager(createRoom());
+    manager.room.players[1].status = 'ready';
+    manager.room.players[1].score = 42;
 
     expect(() => manager.managePlayer('p2', 'p1', 'kick'))
       .toThrow('only the room owner can manage players');
+    expect(() => manager.managePlayer('p1', 'p1', 'kick'))
+      .toThrow('room owner cannot be kicked');
+    expect(() => manager.managePlayer('p1', 'p2', 'ban'))
+      .toThrow('unsupported player management action');
+    expect(() => manager.managePlayer('p1', 'missing', 'kick'))
+      .toThrow('player is not in the room');
 
-    manager.managePlayer('p1', 'p2', 'kick');
-    expect(manager.getPlayerList()).toHaveLength(1);
+    const state = manager.managePlayer('p1', 'p2', 'kick');
+
+    expect(state).toEqual(expect.objectContaining({ ownerId: 'p1', playerCount: 1 }));
+    expect(manager.room.players).toEqual([
+      { player: { id: 'p1', name: 'Owner' }, status: 'not_ready', score: 0 },
+    ]);
+    expect(manager.getPlayerList()).toEqual([
+      {
+        player: { id: 'p1', name: 'Owner' },
+        status: 'not_ready',
+        score: 0,
+        isOwner: true,
+      },
+    ]);
   });
 });

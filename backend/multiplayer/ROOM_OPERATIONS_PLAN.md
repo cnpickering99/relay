@@ -78,12 +78,16 @@ Status: Complete.
 
 ## Step 6: Player List View
 
+Status: Complete.
+
 1. Return every player in the room.
 2. Include player identity, status, score, and owner state.
 3. Keep the response as an array that is safe to send to clients.
 4. Do not expose the internal `Map` or other manager state.
 
 ## Step 7: Owner-Only Player Management
+
+Status: Complete.
 
 1. Verify that the requester is the current owner.
 2. Reject management requests from regular players.
@@ -93,6 +97,8 @@ Status: Complete.
 6. Add additional owner actions only after defining their behavior and permissions.
 
 ## Step 8: WebSocket Integration
+
+Status: Complete.
 
 After the room manager behavior is stable, connect it to WebSocket messages such as:
 
@@ -105,6 +111,8 @@ After the room manager behavior is stable, connect it to WebSocket messages such
 The WebSocket layer should validate the request, call the room manager, and broadcast the resulting room update to affected clients.
 
 ## Step 9: Tests
+
+Status: Partially complete (focused room-operation tests pass; full backend run is blocked by PostgreSQL connection failures).
 
 Add focused tests for:
 

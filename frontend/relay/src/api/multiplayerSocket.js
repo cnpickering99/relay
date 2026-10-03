@@ -16,6 +16,9 @@ export function createMultiplayerSocket() {
     joinRoom(roomId, name) {
       this.send('join_room', { roomId, name });
     },
+    leaveRoom() {
+      this.send('leave_room');
+    },
     chooseMode(mode) {
       this.send('choose_mode', { mode });
     },

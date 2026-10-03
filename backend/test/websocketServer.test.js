@@ -16,7 +16,7 @@ function nextMessage(socket) {
       socket.off('message', onMessage);
       socket.off('error', onError);
     };
-    socket.once('message', onMessage);
+    socket.on('message', onMessage);
     socket.once('error', onError);
   });
 }
@@ -43,8 +43,10 @@ function connect(url) {
 function sendAndWait(socket, payload) {
   return new Promise((resolve, reject) => {
     const onMessage = data => {
+      const message = JSON.parse(data.toString());
+      if (message.type === 'rooms_list' && payload.type !== 'list_rooms') return;
       cleanup();
-      resolve(JSON.parse(data.toString()));
+      resolve(message);
     };
     const onError = error => {
       cleanup();
@@ -55,7 +57,30 @@ function sendAndWait(socket, payload) {
       socket.off('error', onError);
     };
 
-    socket.once('message', onMessage);
+    socket.on('message', onMessage);
+    socket.once('error', onError);
+    socket.send(JSON.stringify(payload));
+  });
+}
+
+function sendAndWaitForType(socket, payload, expectedType) {
+  return new Promise((resolve, reject) => {
+    const onMessage = data => {
+      const message = JSON.parse(data.toString());
+      if (message.type !== expectedType) return;
+      cleanup();
+      resolve(message);
+    };
+    const onError = error => {
+      cleanup();
+      reject(error);
+    };
+    const cleanup = () => {
+      socket.off('message', onMessage);
+      socket.off('error', onError);
+    };
+
+    socket.on('message', onMessage);
     socket.once('error', onError);
     socket.send(JSON.stringify(payload));
   });
@@ -211,6 +236,279 @@ describe('multiplayer WebSocket server', () => {
     socket.close();
   });
 
+  it('broadcasts ready changes to other room members', async () => {
+    const { socket: ownerSocket } = await connect(url);
+    await sendAndWait(ownerSocket, {
+      type: 'create_room',
+      playerName: 'Owner',
+      code: 'READY3',
+    });
+
+    const { socket: memberSocket } = await connect(url);
+    await sendAndWait(memberSocket, {
+      type: 'join_room',
+      roomId: 'READY3',
+      name: 'Member',
+    });
+
+    const roomUpdatePromise = nextRelevantMessage(ownerSocket);
+    const ready = await sendAndWaitForType(
+      memberSocket,
+      { type: 'set_ready', ready: true },
+      'ready_status',
+    );
+    const roomUpdate = await roomUpdatePromise;
+
+    expect(ready.status).toBe('ready');
+    expect(roomUpdate.type).toBe('room_updated');
+    expect(roomUpdate.room.players).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        player: expect.objectContaining({ name: 'Member' }),
+        status: 'ready',
+      }),
+    ]));
+
+    ownerSocket.close();
+    memberSocket.close();
+  });
+
+  it('returns room state to a member and rejects clients outside the room', async () => {
+    const { socket: ownerSocket } = await connect(url);
+    await sendAndWait(ownerSocket, {
+      type: 'create_room',
+      playerName: 'Owner',
+      code: 'GETROOM',
+    });
+
+    const roomState = await sendAndWaitForType(
+      ownerSocket,
+      { type: 'get_room' },
+      'room_state',
+    );
+    expect(roomState.room).toEqual(expect.objectContaining({
+      code: 'GETROOM',
+      name: 'Owner',
+      status: 'lobby',
+      maxPlayers: 4,
+      type_of_game: 1,
+      playerCount: 1,
+    }));
+    expect(roomState.room).not.toHaveProperty('roomId');
+
+    const { socket: outsideSocket } = await connect(url);
+    const rejected = await sendAndWait(outsideSocket, { type: 'get_room' });
+    expect(rejected).toEqual({ type: 'error', message: 'player is not in a room' });
+    const leaveRejected = await sendAndWait(outsideSocket, { type: 'leave_room' });
+    expect(leaveRejected).toEqual({ type: 'error', message: 'player is not in a room' });
+
+    ownerSocket.close();
+    outsideSocket.close();
+  });
+
+  it('allows a member to leave, transfers ownership, and removes an empty room', async () => {
+    const { socket: ownerSocket } = await connect(url);
+    await sendAndWait(ownerSocket, {
+      type: 'create_room',
+      playerName: 'Owner',
+      code: 'LEAVE1',
+    });
+
+    const { socket: memberSocket } = await connect(url);
+    const joined = await sendAndWait(memberSocket, {
+      type: 'join_room',
+      roomId: 'LEAVE1',
+      name: 'Member',
+    });
+
+    const ownerUpdatePromise = nextRelevantMessage(memberSocket);
+    const ownerLeft = await sendAndWaitForType(
+      ownerSocket,
+      { type: 'leave_room' },
+      'room_left',
+    );
+    const ownerUpdate = await ownerUpdatePromise;
+
+    expect(ownerLeft.roomId).toBe('LEAVE1');
+    expect(ownerUpdate.type).toBe('room_updated');
+    expect(ownerUpdate.room.ownerId).toBe(joined.playerId);
+    expect(ownerUpdate.room.playerCount).toBe(1);
+
+    const memberLeft = await sendAndWaitForType(
+      memberSocket,
+      { type: 'leave_room' },
+      'room_left',
+    );
+    expect(memberLeft.roomId).toBe('LEAVE1');
+
+    const { socket: observerSocket } = await connect(url);
+    const roomList = await sendAndWaitForType(
+      observerSocket,
+      { type: 'list_rooms' },
+      'rooms_list',
+    );
+    expect(roomList.rooms).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ roomId: 'LEAVE1' }),
+    ]));
+
+    ownerSocket.close();
+    memberSocket.close();
+    observerSocket.close();
+  });
+
+  it('returns every room player with status, score, and owner state', async () => {
+    const { socket: ownerSocket } = await connect(url);
+    const created = await sendAndWait(ownerSocket, {
+      type: 'create_room',
+      playerName: 'Owner',
+      code: 'LIST01',
+    });
+
+    const { socket: memberSocket } = await connect(url);
+    const joined = await sendAndWait(memberSocket, {
+      type: 'join_room',
+      roomId: 'LIST01',
+      name: 'Member',
+    });
+    await sendAndWait(memberSocket, { type: 'set_ready', ready: true });
+
+    const response = await sendAndWaitForType(
+      ownerSocket,
+      { type: 'get_players' },
+      'players_list',
+    );
+
+    expect(response).toEqual({
+      type: 'players_list',
+      players: [
+        {
+          player: { id: created.playerId, name: 'Owner' },
+          status: 'not_ready',
+          score: 0,
+          isOwner: true,
+        },
+        {
+          player: { id: joined.playerId, name: 'Member' },
+          status: 'ready',
+          score: 0,
+          isOwner: false,
+        },
+      ],
+    });
+
+    ownerSocket.close();
+    memberSocket.close();
+  });
+
+  it('rejects player-list requests from clients outside a room', async () => {
+    const { socket } = await connect(url);
+
+    const response = await sendAndWait(socket, { type: 'get_players' });
+
+    expect(response).toEqual({ type: 'error', message: 'player is not in a room' });
+    socket.close();
+  });
+
+  it('enforces owner-only player management and notifies the room after a kick', async () => {
+    const { socket: ownerSocket } = await connect(url);
+    const created = await sendAndWait(ownerSocket, {
+      type: 'create_room',
+      playerName: 'Owner',
+      code: 'KICK01',
+      maxPlayers: 4,
+    });
+
+    const { socket: targetSocket } = await connect(url);
+    const targetJoined = await sendAndWait(targetSocket, {
+      type: 'join_room',
+      roomId: 'KICK01',
+      name: 'Target',
+    });
+
+    const { socket: memberSocket } = await connect(url);
+    await sendAndWait(memberSocket, {
+      type: 'join_room',
+      roomId: 'KICK01',
+      name: 'Member',
+    });
+
+    const notOwner = await sendAndWait(memberSocket, {
+      type: 'manage_player',
+      action: 'kick',
+      targetPlayerId: targetJoined.playerId,
+    });
+    expect(notOwner).toEqual({
+      type: 'error',
+      message: 'only the room owner can manage players',
+    });
+
+    const selfKick = await sendAndWait(ownerSocket, {
+      type: 'manage_player',
+      action: 'kick',
+      targetPlayerId: created.playerId,
+    });
+    expect(selfKick).toEqual({ type: 'error', message: 'room owner cannot be kicked' });
+
+    const unsupportedAction = await sendAndWait(ownerSocket, {
+      type: 'manage_player',
+      action: 'ban',
+      targetPlayerId: targetJoined.playerId,
+    });
+    expect(unsupportedAction).toEqual({
+      type: 'error',
+      message: 'unsupported player management action',
+    });
+
+    const missingPlayer = await sendAndWait(ownerSocket, {
+      type: 'manage_player',
+      action: 'kick',
+      targetPlayerId: 'missing-player',
+    });
+    expect(missingPlayer).toEqual({ type: 'error', message: 'player is not in the room' });
+
+    const kickedNotification = nextMessage(targetSocket);
+    const roomUpdate = nextMessage(memberSocket);
+    const result = await sendAndWait(ownerSocket, {
+      type: 'manage_player',
+      action: 'kick',
+      targetPlayerId: targetJoined.playerId,
+    });
+
+    expect(result.type).toBe('player_managed');
+    expect(result.room.players).toEqual(expect.arrayContaining([
+      expect.objectContaining({ player: expect.objectContaining({ id: created.playerId }) }),
+      expect.objectContaining({ player: expect.objectContaining({ name: 'Member' }) }),
+    ]));
+    expect(result.room.players).toHaveLength(2);
+    expect(await kickedNotification).toEqual({ type: 'player_kicked', roomId: 'KICK01' });
+
+    const update = await roomUpdate;
+    expect(update.type).toBe('room_updated');
+    expect(update.room.players).toHaveLength(2);
+    expect(update.room.players).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ player: expect.objectContaining({ id: targetJoined.playerId }) }),
+    ]));
+
+    const finalPlayers = await sendAndWait(ownerSocket, { type: 'get_players' });
+    expect(finalPlayers.players).toHaveLength(2);
+
+    ownerSocket.close();
+    targetSocket.close();
+    memberSocket.close();
+  });
+
+  it('rejects player-management requests from clients outside a room', async () => {
+    const { socket } = await connect(url);
+
+    const response = await sendAndWait(socket, {
+      type: 'manage_player',
+      action: 'kick',
+      targetPlayerId: 'player-1',
+    });
+
+    expect(response).toEqual({ type: 'error', message: 'player is not in a room' });
+    socket.close();
+  });
+
   it('allows room discovery and joining after an owner disconnects', async () => {
     const { socket: ownerSocket } = await connect(url);
     await sendAndWait(ownerSocket, {
@@ -226,9 +524,15 @@ describe('multiplayer WebSocket server', () => {
       name: 'Remaining',
     });
 
+    const disconnectUpdatePromise = nextRelevantMessage(remainingSocket);
     const ownerDisconnected = new Promise(resolve => ownerSocket.once('close', resolve));
     ownerSocket.close();
     await ownerDisconnected;
+    const disconnectUpdate = await disconnectUpdatePromise;
+    expect(disconnectUpdate.type).toBe('room_updated');
+    expect(disconnectUpdate.room.ownerId).toBe(
+      disconnectUpdate.room.players[0].player.id,
+    );
 
     const { socket: joiningSocket } = await connect(url);
     const roomList = await sendAndWait(joiningSocket, { type: 'list_rooms' });

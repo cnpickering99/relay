@@ -35,9 +35,11 @@ function listRoomsState(rooms) {
   }));
 }
 
-function broadcastRoom(sockets, roomId, type, payload) {
+function broadcastRoom(sockets, roomId, type, payload, excludedSocket = null) {
   for (const [client, clientState] of sockets) {
-    if (clientState.roomId === roomId) send(client, type, payload);
+    if (client !== excludedSocket && clientState.roomId === roomId) {
+      send(client, type, payload);
+    }
   }
 }
 
@@ -137,6 +139,37 @@ function createWebSocketServer(server) {
           return;
         }
 
+        if (message.type === 'leave_room') {
+          const clientState = sockets.get(socket);
+          if (!clientState?.roomId) {
+            throw new Error('player is not in a room');
+          }
+
+          const leavingRoomId = clientState.roomId;
+          const updatedRoom = rooms.removePlayer(leavingRoomId, player.id);
+          clientState.roomId = null;
+          roomId = null;
+          send(socket, 'room_left', { roomId: leavingRoomId });
+
+          if (updatedRoom?.playerCount > 0) {
+            broadcastRoom(sockets, leavingRoomId, 'room_updated', { room: updatedRoom });
+          }
+          broadcastRoomList(sockets);
+          return;
+        }
+
+        if (message.type === 'get_room') {
+          const clientState = sockets.get(socket);
+          if (!clientState?.roomId) {
+            throw new Error('player is not in a room');
+          }
+
+          const room = rooms.findRoom(clientState.roomId);
+          const state = new RoomManager(room).getRoomState();
+          send(socket, 'room_state', { room: state });
+          return;
+        }
+
         if (message.type === 'set_ready') {
           if (typeof message.ready !== 'boolean') {
             throw new Error('ready must be a boolean');
@@ -148,8 +181,60 @@ function createWebSocketServer(server) {
           }
 
           const room = rooms.findRoom(clientState.roomId);
-          const result = new RoomManager(room).setReady(player.id, message.ready);
+          const roomManager = new RoomManager(room);
+          const result = roomManager.setReady(player.id, message.ready);
           send(socket, 'ready_status', result);
+          broadcastRoom(
+            sockets,
+            clientState.roomId,
+            'room_updated',
+            { room: roomManager.getRoomState() },
+            socket,
+          );
+          return;
+        }
+
+        if (message.type === 'get_players') {
+          const clientState = sockets.get(socket);
+          if (!clientState?.roomId) {
+            throw new Error('player is not in a room');
+          }
+
+          const room = rooms.findRoom(clientState.roomId);
+          const players = new RoomManager(room).getPlayerList();
+          send(socket, 'players_list', { players });
+          return;
+        }
+
+        if (message.type === 'manage_player') {
+          const clientState = sockets.get(socket);
+          if (!clientState?.roomId) {
+            throw new Error('player is not in a room');
+          }
+          if (typeof message.targetPlayerId !== 'string' || !message.targetPlayerId) {
+            throw new Error('targetPlayerId is required');
+          }
+
+          const room = rooms.findRoom(clientState.roomId);
+          const updatedRoom = new RoomManager(room).managePlayer(
+            player.id,
+            message.targetPlayerId,
+            message.action,
+          );
+
+          for (const [client, state] of sockets) {
+            if (state.roomId !== room.id) continue;
+
+            if (state.playerId === message.targetPlayerId) {
+              state.roomId = null;
+              send(client, 'player_kicked', { roomId: room.id });
+            } else if (client !== socket) {
+              send(client, 'room_updated', { room: updatedRoom });
+            }
+          }
+
+          send(socket, 'player_managed', { room: updatedRoom });
+          broadcastRoomList(sockets);
           return;
         }
 
@@ -161,8 +246,17 @@ function createWebSocketServer(server) {
 
     socket.on('close', () => {
       const state = sockets.get(socket);
-      if (state?.roomId) rooms.removePlayer(state.roomId, player.id);
+      const closedRoomId = state?.roomId;
+      const updatedRoom = closedRoomId ? rooms.removePlayer(closedRoomId, player.id) : null;
+      if (state) state.roomId = null;
       sockets.delete(socket);
+
+      if (updatedRoom) {
+        if (updatedRoom.playerCount > 0) {
+          broadcastRoom(sockets, closedRoomId, 'room_updated', { room: updatedRoom });
+        }
+        broadcastRoomList(sockets);
+      }
     });
   });
 
