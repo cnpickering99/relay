@@ -2,6 +2,7 @@ const WebSocket = require('ws');
 const { WebSocketServer } = WebSocket;
 const crypto = require('crypto');
 const LobbyManager = require('./lobbyManager');
+const RoomManager = require('./roomManager');
 
 function playerCount(room) {
   return room.players instanceof Map ? room.players.size : room.players.length;
@@ -133,6 +134,22 @@ function createWebSocketServer(server) {
             room: roomState(room),
           });
           broadcastRoomList(sockets);
+          return;
+        }
+
+        if (message.type === 'set_ready') {
+          if (typeof message.ready !== 'boolean') {
+            throw new Error('ready must be a boolean');
+          }
+
+          const clientState = sockets.get(socket);
+          if (!clientState?.roomId) {
+            throw new Error('player is not in a room');
+          }
+
+          const room = rooms.findRoom(clientState.roomId);
+          const result = new RoomManager(room).setReady(player.id, message.ready);
+          send(socket, 'ready_status', result);
           return;
         }
 

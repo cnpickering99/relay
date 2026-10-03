@@ -168,6 +168,49 @@ describe('multiplayer WebSocket server', () => {
     playerTwoSocket.close();
   });
 
+  it('sets ready and not-ready status for a room member', async () => {
+    const { socket } = await connect(url);
+    const created = await sendAndWait(socket, {
+      type: 'create_room',
+      playerName: 'Ready Player',
+      code: 'READY1',
+    });
+
+    const ready = await sendAndWait(socket, { type: 'set_ready', ready: true });
+    expect(ready).toEqual({
+      type: 'ready_status',
+      playerId: created.playerId,
+      status: 'ready',
+    });
+
+    const notReady = await sendAndWait(socket, { type: 'set_ready', ready: false });
+    expect(notReady).toEqual({
+      type: 'ready_status',
+      playerId: created.playerId,
+      status: 'not_ready',
+    });
+
+    socket.close();
+  });
+
+  it('rejects invalid ready values and players outside a room', async () => {
+    const { socket } = await connect(url);
+
+    const outsideRoom = await sendAndWait(socket, { type: 'set_ready', ready: true });
+    expect(outsideRoom).toEqual({ type: 'error', message: 'player is not in a room' });
+
+    await sendAndWait(socket, {
+      type: 'create_room',
+      playerName: 'Ready Player',
+      code: 'READY2',
+    });
+
+    const invalidReady = await sendAndWait(socket, { type: 'set_ready', ready: 'true' });
+    expect(invalidReady).toEqual({ type: 'error', message: 'ready must be a boolean' });
+
+    socket.close();
+  });
+
   it('allows room discovery and joining after an owner disconnects', async () => {
     const { socket: ownerSocket } = await connect(url);
     await sendAndWait(ownerSocket, {
