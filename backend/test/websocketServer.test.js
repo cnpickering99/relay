@@ -512,7 +512,7 @@ describe('multiplayer WebSocket server', () => {
       name: 'Target',
     });
 
-    const bannedNotification = nextMessage(targetSocket);
+    const bannedNotification = nextRelevantMessage(targetSocket);
     const result = await sendAndWait(ownerSocket, {
       type: 'manage_player',
       action: 'ban',
