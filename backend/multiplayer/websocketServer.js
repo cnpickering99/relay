@@ -31,7 +31,7 @@ function listRoomsState(rooms) {
     status: room.status,
     playerCount: playerCount(room),
     maxPlayers: room.maxPlayers,
-    owner: room.owner
+    owner: room.ownerId
   }));
 }
 

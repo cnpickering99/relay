@@ -16,6 +16,10 @@
     {
       "key": "roomCode",
       "value": "TEST01"
+    },
+    {
+      "key": "targetPlayerId",
+      "value": "PASTE_A_PLAYER_ID_HERE"
     }
   ],
   "item": [
@@ -115,6 +119,71 @@
         "body": {
           "mode": "raw",
           "raw": "{\n  \"type\": \"join_room\",\n  \"roomId\": \"{{roomCode}}\",\n  \"name\": \"Player Three\"\n}"
+        },
+        "url": "http://{{host}}:{{port}}/multiplayer"
+      }
+    },
+    {
+      "name": "Get Room Message",
+      "description": "Copy the Body JSON into the Postman WebSocket message panel. Requires the sending connection to already be in a room (via create_room or join_room).",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"get_room\"\n}"
+        },
+        "url": "http://{{host}}:{{port}}/multiplayer"
+      }
+    },
+    {
+      "name": "Get Players Message",
+      "description": "Copy the Body JSON into the Postman WebSocket message panel. Requires the sending connection to already be in a room.",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"get_players\"\n}"
+        },
+        "url": "http://{{host}}:{{port}}/multiplayer"
+      }
+    },
+    {
+      "name": "Set Ready Message",
+      "description": "Copy the Body JSON into the Postman WebSocket message panel. Set ready to false to flip back to not_ready. Requires the sending connection to already be in a room.",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"set_ready\",\n  \"ready\": true\n}"
+        },
+        "url": "http://{{host}}:{{port}}/multiplayer"
+      }
+    },
+    {
+      "name": "Leave Room Message",
+      "description": "Copy the Body JSON into the Postman WebSocket message panel. Requires the sending connection to already be in a room. Works in the lobby or while a game is in progress.",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"leave_room\"\n}"
+        },
+        "url": "http://{{host}}:{{port}}/multiplayer"
+      }
+    },
+    {
+      "name": "Manage Player (Kick) Message",
+      "description": "Copy the Body JSON into the Postman WebSocket message panel. Only the current room owner can send this. Set targetPlayerId to a real player id returned by room_created/room_joined/players_list (owner cannot target themselves).",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"manage_player\",\n  \"targetPlayerId\": \"{{targetPlayerId}}\",\n  \"action\": \"kick\"\n}"
         },
         "url": "http://{{host}}:{{port}}/multiplayer"
       }

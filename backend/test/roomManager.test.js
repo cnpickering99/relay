@@ -1,4 +1,5 @@
 const RoomManager = require('../multiplayer/roomManager');
+const { GameStatus } = require('../multiplayer/enums');
 
 function createRoom() {
   return {
@@ -170,6 +171,39 @@ describe('RoomManager', () => {
 
     expect(() => manager.leaveRoom('missing'))
       .toThrow('player is not in the room');
+  });
+
+  it('allows leaving while the game is in progress, not just in the lobby', () => {
+    const room = createRoom();
+    room.status = GameStatus.IN_GAME;
+    const manager = new RoomManager(room);
+
+    const state = manager.leaveRoom('p2');
+
+    expect(state.status).toBe(GameStatus.IN_GAME);
+    expect(state.playerCount).toBe(1);
+    expect(state.ownerId).toBe('p1');
+  });
+
+  it('transfers ownership to whichever remaining player joined earliest when the owner leaves', () => {
+    const room = {
+      id: 'ROOM3',
+      ownerId: 'p1',
+      status: GameStatus.LOBBY,
+      maxPlayers: 4,
+      players: new Map([
+        ['p1', { id: 'p1', name: 'Owner' }],
+        ['p2', { id: 'p2', name: 'Second' }],
+        ['p3', { id: 'p3', name: 'Third' }],
+      ]),
+    };
+    const manager = new RoomManager(room);
+
+    const state = manager.leaveRoom('p1');
+
+    expect(state.ownerId).toBe('p2');
+    expect(state.playerCount).toBe(2);
+    expect(manager.getPlayerList().map(entry => entry.player.id)).toEqual(['p2', 'p3']);
   });
 
   it('allows only the owner to kick a player', () => {

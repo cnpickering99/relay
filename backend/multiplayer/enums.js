@@ -1,5 +1,6 @@
 const GameStatus = Object.freeze({
   LOBBY: 'lobby',
+  IN_GAME: 'in_game',
 });
 
 const ValidationReason = Object.freeze({

@@ -5,6 +5,7 @@ describe('GameStatus', () => {
   it('defines the supported room states', () => {
     expect(GameStatus).toEqual({
       LOBBY: 'lobby',
+      IN_GAME: 'in_game',
     });
   });
 
