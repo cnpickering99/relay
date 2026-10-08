@@ -5,6 +5,8 @@ const RoomManager = require('./roomManager');
 class LobbyManager {
   constructor() {
     this.rooms = new Map();
+    // ownerId -> Set of playerIds permanently banned from that owner's rooms
+    this.bansByOwner = new Map();
   }
 
   createRoom({ name = 'Lobby', maxPlayers = 4, code, ownerId } = {}) {
@@ -65,9 +67,23 @@ class LobbyManager {
     return room;
   }
 
+  banPlayer(ownerId, playerId) {
+    if (!this.bansByOwner.has(ownerId)) {
+      this.bansByOwner.set(ownerId, new Set());
+    }
+    this.bansByOwner.get(ownerId).add(playerId);
+  }
+
+  isBannedByOwner(ownerId, playerId) {
+    return this.bansByOwner.get(ownerId)?.has(playerId) ?? false;
+  }
+
   joinRoom(roomId, player) {
     const room = this.findRoom(roomId);
     if (!player || !player.id) throw new Error('player id is required');
+    if (this.isBannedByOwner(room.ownerId, player.id)) {
+      throw new Error('player is banned from this room');
+    }
     const playersAreMapped = room.players instanceof Map;
     const existingPlayer = playersAreMapped
       ? room.players.has(player.id)

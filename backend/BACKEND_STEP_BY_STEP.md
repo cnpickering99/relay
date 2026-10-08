@@ -136,24 +136,36 @@ implementing (e.g. does this cover anything beyond the existing `leaveRoom`/
 `leave_room` path — rejoin behavior, leave during an active game vs. lobby,
 etc.).
 
-## Step 11: Banning a Player — **Not started**
+## Step 11: Banning a Player — **Done (no unban yet)**
 
-A new owner action distinct from `kick`: banning a player should also
-prevent that player from ever rejoining the room (not just removing them
-once). Needs:
-- A new `managePlayer` action (e.g. `'ban'`) alongside the existing `'kick'`.
-- Some persisted ban list per room (survives the banned player leaving/
-  rejoining attempts) that `LobbyManager.joinRoom` checks before admitting a
-  player.
-- Decide what happens to a banned player's existing entry if they're
-  currently in the room (presumably removed like a kick, plus the permanent
-  block).
-- Decide ban lifetime/scope (room-only vs. owner-only ability to unban, does
-  it persist only as long as the room exists, etc.).
+Scope as defined: banning removes the player from the current room (like
+`kick`) **and** permanently blocks that player id from joining any room
+created by that same owner, present or future.
 
-Not implemented yet — behavior and permissions need to be defined first, per
-Step 7's guidance to only add new owner actions once their behavior is
-defined.
+- `RoomManager.managePlayer` now accepts `'ban'` alongside `'kick'` — same
+  owner-only / no-self-target checks, same removal from the current room.
+- `LobbyManager` owns the permanent part, since bans must survive beyond any
+  single room's lifetime: `bansByOwner` (`Map<ownerId, Set<playerId>>`),
+  with `banPlayer(ownerId, playerId)` and `isBannedByOwner(ownerId,
+  playerId)`. `joinRoom` checks `isBannedByOwner(room.ownerId, player.id)`
+  before admitting anyone, so it's enforced on the current room and on every
+  future room that same owner creates.
+- `websocketServer.js`'s `manage_player` handler calls `RoomManager` to do
+  the removal, then (only for `action === 'ban'`) calls
+  `rooms.banPlayer(ownerId, targetPlayerId)` to persist it. The removed
+  client gets `player_banned` instead of `player_kicked` so the client can
+  distinguish the two.
+- Ban scope is tied to the *owner who issued it*, not to a specific room:
+  if ownership of a room transfers to someone else, bans from the previous
+  owner stop applying to that room but still apply everywhere that original
+  owner creates new rooms.
+- Tested in `test/roomManager.test.js` (owner-only, no self-ban, removes
+  status/score) and `test/gameStatus.test.js` (ban blocks rejoin in the same
+  room, blocks joining a brand-new room from the same owner after the first
+  is deleted, and does *not* block joining a different owner's room).
+
+Not implemented: an `unban` action — there is currently no way to reverse a
+ban.
 
 ## What's next
 

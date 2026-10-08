@@ -68,12 +68,12 @@ class RoomManager {
 			throw new Error('only the room owner can manage players');
 		}
 
-		if (action !== 'kick') {
+		if (action !== 'kick' && action !== 'ban') {
 			throw new Error('unsupported player management action');
 		}
 
 		if (targetPlayerId === ownerId) {
-			throw new Error('room owner cannot be kicked');
+			throw new Error(`room owner cannot be ${action === 'ban' ? 'banned' : 'kicked'}`);
 		}
 
 		this.requirePlayer(targetPlayerId);

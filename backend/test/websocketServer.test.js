@@ -450,7 +450,7 @@ describe('multiplayer WebSocket server', () => {
 
     const unsupportedAction = await sendAndWait(ownerSocket, {
       type: 'manage_player',
-      action: 'ban',
+      action: 'mute',
       targetPlayerId: targetJoined.playerId,
     });
     expect(unsupportedAction).toEqual({
@@ -494,6 +494,61 @@ describe('multiplayer WebSocket server', () => {
     ownerSocket.close();
     targetSocket.close();
     memberSocket.close();
+  });
+
+  it('bans a player and blocks them from rejoining that owner\'s rooms afterward', async () => {
+    const { socket: ownerSocket } = await connect(url);
+    const created = await sendAndWait(ownerSocket, {
+      type: 'create_room',
+      playerName: 'Owner',
+      code: 'BAN01',
+      maxPlayers: 4,
+    });
+
+    const { socket: targetSocket } = await connect(url);
+    const targetJoined = await sendAndWait(targetSocket, {
+      type: 'join_room',
+      roomId: 'BAN01',
+      name: 'Target',
+    });
+
+    const bannedNotification = nextMessage(targetSocket);
+    const result = await sendAndWait(ownerSocket, {
+      type: 'manage_player',
+      action: 'ban',
+      targetPlayerId: targetJoined.playerId,
+    });
+
+    expect(result.type).toBe('player_managed');
+    expect(result.room.players).toHaveLength(1);
+    expect(await bannedNotification).toEqual({ type: 'player_banned', roomId: 'BAN01' });
+
+    const rejoinAttempt = await sendAndWait(targetSocket, {
+      type: 'join_room',
+      roomId: 'BAN01',
+      name: 'Target',
+    });
+    expect(rejoinAttempt).toEqual({ type: 'error', message: 'player is banned from this room' });
+
+    await sendAndWait(ownerSocket, { type: 'delete_room', roomId: 'BAN01' });
+
+    const secondRoom = await sendAndWait(ownerSocket, {
+      type: 'create_room',
+      playerName: 'Owner',
+      code: 'BAN02',
+      maxPlayers: 4,
+    });
+    expect(secondRoom.type).toBe('room_created');
+
+    const newRoomJoinAttempt = await sendAndWait(targetSocket, {
+      type: 'join_room',
+      roomId: 'BAN02',
+      name: 'Target',
+    });
+    expect(newRoomJoinAttempt).toEqual({ type: 'error', message: 'player is banned from this room' });
+
+    ownerSocket.close();
+    targetSocket.close();
   });
 
   it('rejects player-management requests from clients outside a room', async () => {

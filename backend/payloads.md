@@ -146,8 +146,9 @@ everyone
 }
 ```
 
-**Errors:** `player is already in a room`, `room not found`, `room is no
-longer accepting players` (status isn't `lobby`), `room is full`
+**Errors:** `player is already in a room`, `room not found`, `player is
+banned from this room` (banned by this room's owner, see `manage_player`),
+`room is no longer accepting players` (status isn't `lobby`), `room is full`
 
 ---
 
@@ -315,17 +316,35 @@ sending `leave_room`) triggers the same cleanup automatically.
 
 ## manage_player
 
-Owner-only room management. Currently only the `kick` action is supported.
+Owner-only room management. Supports two actions: `kick` and `ban`.
 
 **Send**
 ```json
 { "type": "manage_player", "targetPlayerId": "<uuid>", "action": "kick" }
 ```
+```json
+{ "type": "manage_player", "targetPlayerId": "<uuid>", "action": "ban" }
+```
+
+- `kick` removes the player from the room for this session only. They can
+  rejoin with the room code immediately afterward.
+- `ban` does everything `kick` does, **plus** permanently blocks that player
+  id from joining this room again, and from joining *any future room this
+  same owner creates* — even after the room is deleted and a new one is
+  created by that owner. The ban is keyed to the owner issuing it, not to any
+  one room, and is not lifted by anything in the current API (no `unban`
+  yet). If ownership of a room later transfers to someone else, bans issued
+  by the *previous* owner no longer apply to that room (they still apply to
+  rooms the original banning owner creates elsewhere).
 
 **Receive:**
-- The kicked socket gets:
+- The removed socket gets `player_kicked` (for `kick`) or `player_banned`
+  (for `ban`):
   ```json
   { "type": "player_kicked", "roomId": "TEST01" }
+  ```
+  ```json
+  { "type": "player_banned", "roomId": "TEST01" }
   ```
 - Everyone else still in the room gets `room_updated`:
   ```json
@@ -350,13 +369,16 @@ Owner-only room management. Currently only the `kick` action is supported.
 - Everyone gets a `rooms_list` refresh.
 
 **Errors:** `player is not in a room`, `targetPlayerId is required`, `only
-the room owner can manage players`, `room owner cannot be kicked`,
-`unsupported player management action` (anything other than `kick`),
-`player is not in the room` (unknown `targetPlayerId`)
+the room owner can manage players`, `room owner cannot be kicked` /
+`room owner cannot be banned`, `unsupported player management action`
+(anything other than `kick`/`ban`), `player is not in the room` (unknown
+`targetPlayerId`)
 
-**Not yet implemented:** a `ban` action — see `BACKEND_STEP_BY_STEP.md` Step
-11. Right now `kick` only removes the player for the current session; they
-can rejoin with the room code immediately after.
+A banned player attempting to `join_room` (this room, or any future room
+created by the same owner) gets: `player is banned from this room`.
+
+**Not yet implemented:** an `unban` action — there's currently no way to
+reverse a ban. See `BACKEND_STEP_BY_STEP.md` Step 11.
 
 ---
 

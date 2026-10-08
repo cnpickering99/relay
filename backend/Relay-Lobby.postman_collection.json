@@ -177,13 +177,26 @@
     },
     {
       "name": "Manage Player (Kick) Message",
-      "description": "Copy the Body JSON into the Postman WebSocket message panel. Only the current room owner can send this. Set targetPlayerId to a real player id returned by room_created/room_joined/players_list (owner cannot target themselves).",
+      "description": "Copy the Body JSON into the Postman WebSocket message panel. Only the current room owner can send this. Set targetPlayerId to a real player id returned by room_created/room_joined/players_list (owner cannot target themselves). Kicked players can rejoin with the room code afterward.",
       "request": {
         "method": "POST",
         "header": [],
         "body": {
           "mode": "raw",
           "raw": "{\n  \"type\": \"manage_player\",\n  \"targetPlayerId\": \"{{targetPlayerId}}\",\n  \"action\": \"kick\"\n}"
+        },
+        "url": "http://{{host}}:{{port}}/multiplayer"
+      }
+    },
+    {
+      "name": "Manage Player (Ban) Message",
+      "description": "Copy the Body JSON into the Postman WebSocket message panel. Only the current room owner can send this. Removes the target from the room AND permanently blocks that player id from joining this room or any future room created by this same owner (owner cannot target themselves).",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"manage_player\",\n  \"targetPlayerId\": \"{{targetPlayerId}}\",\n  \"action\": \"ban\"\n}"
         },
         "url": "http://{{host}}:{{port}}/multiplayer"
       }

@@ -74,4 +74,46 @@ describe('LobbyManager lobby lifecycle', () => {
       score: 0,
     });
   });
+
+  it('bans a player permanently from the room they were banned in', () => {
+    const rooms = new LobbyManager();
+    const room = rooms.createRoom({ ownerId: 'owner-1' });
+    rooms.joinRoom(room.id, { id: 'owner-1', name: 'Owner' });
+    rooms.joinRoom(room.id, { id: 'troll', name: 'Troll' });
+
+    rooms.banPlayer('owner-1', 'troll');
+
+    expect(rooms.isBannedByOwner('owner-1', 'troll')).toBe(true);
+    expect(() => rooms.joinRoom(room.id, { id: 'troll', name: 'Troll' }))
+      .toThrow('player is banned from this room');
+  });
+
+  it('bans a player from every future room the banning owner creates', () => {
+    const rooms = new LobbyManager();
+    const firstRoom = rooms.createRoom({ ownerId: 'owner-1', code: 'ROOMA' });
+    rooms.joinRoom(firstRoom.id, { id: 'owner-1', name: 'Owner' });
+    rooms.joinRoom(firstRoom.id, { id: 'troll', name: 'Troll' });
+    rooms.banPlayer('owner-1', 'troll');
+
+    // owner leaves/deletes the first room and opens a new one later
+    rooms.deleteRoom(firstRoom.id, 'owner-1');
+    const secondRoom = rooms.createRoom({ ownerId: 'owner-1', code: 'ROOMB' });
+    rooms.joinRoom(secondRoom.id, { id: 'owner-1', name: 'Owner' });
+
+    expect(() => rooms.joinRoom(secondRoom.id, { id: 'troll', name: 'Troll' }))
+      .toThrow('player is banned from this room');
+  });
+
+  it('does not ban a player from rooms owned by someone else', () => {
+    const rooms = new LobbyManager();
+    const bannedFromRoom = rooms.createRoom({ ownerId: 'owner-1', code: 'ROOMA' });
+    rooms.joinRoom(bannedFromRoom.id, { id: 'owner-1', name: 'Owner' });
+    rooms.banPlayer('owner-1', 'troll');
+
+    const otherOwnersRoom = rooms.createRoom({ ownerId: 'owner-2', code: 'ROOMC' });
+    rooms.joinRoom(otherOwnersRoom.id, { id: 'owner-2', name: 'Other Owner' });
+
+    expect(() => rooms.joinRoom(otherOwnersRoom.id, { id: 'troll', name: 'Troll' }))
+      .not.toThrow();
+  });
 });

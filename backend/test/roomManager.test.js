@@ -215,7 +215,7 @@ describe('RoomManager', () => {
       .toThrow('only the room owner can manage players');
     expect(() => manager.managePlayer('p1', 'p1', 'kick'))
       .toThrow('room owner cannot be kicked');
-    expect(() => manager.managePlayer('p1', 'p2', 'ban'))
+    expect(() => manager.managePlayer('p1', 'p2', 'mute'))
       .toThrow('unsupported player management action');
     expect(() => manager.managePlayer('p1', 'missing', 'kick'))
       .toThrow('player is not in the room');
@@ -233,6 +233,26 @@ describe('RoomManager', () => {
         score: 0,
         isOwner: true,
       },
+    ]);
+  });
+
+  it('allows only the owner to ban a player, removing their status and score', () => {
+    const manager = new RoomManager(createRoom());
+    manager.room.players[1].status = 'ready';
+    manager.room.players[1].score = 42;
+
+    expect(() => manager.managePlayer('p2', 'p1', 'ban'))
+      .toThrow('only the room owner can manage players');
+    expect(() => manager.managePlayer('p1', 'p1', 'ban'))
+      .toThrow('room owner cannot be banned');
+    expect(() => manager.managePlayer('p1', 'missing', 'ban'))
+      .toThrow('player is not in the room');
+
+    const state = manager.managePlayer('p1', 'p2', 'ban');
+
+    expect(state).toEqual(expect.objectContaining({ ownerId: 'p1', playerCount: 1 }));
+    expect(manager.room.players).toEqual([
+      { player: { id: 'p1', name: 'Owner' }, status: 'not_ready', score: 0 },
     ]);
   });
 });

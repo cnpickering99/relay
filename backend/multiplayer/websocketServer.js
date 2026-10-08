@@ -222,12 +222,17 @@ function createWebSocketServer(server) {
             message.action,
           );
 
+          if (message.action === 'ban') {
+            rooms.banPlayer(player.id, message.targetPlayerId);
+          }
+
+          const removedEventType = message.action === 'ban' ? 'player_banned' : 'player_kicked';
           for (const [client, state] of sockets) {
             if (state.roomId !== room.id) continue;
 
             if (state.playerId === message.targetPlayerId) {
               state.roomId = null;
-              send(client, 'player_kicked', { roomId: room.id });
+              send(client, removedEventType, { roomId: room.id });
             } else if (client !== socket) {
               send(client, 'room_updated', { room: updatedRoom });
             }
