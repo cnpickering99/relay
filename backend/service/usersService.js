@@ -3,32 +3,29 @@
 // Service layer for public.users
 //
 // Sits between controllers/routes and usersDataLayer.js. Owns the
-// business logic for the auth flow:
+// business logic for the one-click email login flow:
 //
-//   1. registerUser        -> creates a user + generates a verification code
-//   2. verifyEmail         -> checks the code, then issues an auth token
-//   3. resendVerificationCode -> issues a fresh code if needed
-//   4. validateAuthToken   -> checks a token is valid and not expired
-//   5. logout              -> clears the auth token
-//   6. getProfile          -> returns a safe (non-sensitive) view of a user
+//   1. requestLogin        -> find-or-create the user by email, issue a
+//                              fresh one-click login token
+//   2. verifyEmail         -> checks the token, then issues an auth token
+//   3. validateAuthToken   -> checks a token is valid and not expired
+//   4. logout              -> clears the auth token
+//   5. getProfile          -> returns a safe (non-sensitive) view of a user
 //
-// Codes/tokens are generated with Node's built-in `crypto` module —
-// no external dependencies required.
+// Tokens are generated with Node's built-in `crypto` module — no
+// external dependencies required.
+//
+// Note: the `verificationcode`/`vcexpierytime` columns predate this flow
+// (they used to hold a short 6-digit code). They're reused as-is here to
+// hold the one-click login token + its expiry — same purpose (a
+// short-lived secret proving email ownership), just a longer random
+// value now. No schema change needed.
 
 const crypto = require('crypto');
 const usersDataLayer = require('./../data/users');
 
-const VERIFICATION_CODE_TTL_MINUTES = 15;
+const LOGIN_TOKEN_TTL_MINUTES = 15;
 const AUTH_TOKEN_TTL_HOURS = 24;
-
-/**
- * Generate a 6-digit numeric verification code.
- * (Easy for a user to type/read from an email.)
- */
-function generateVerificationCode() {
-  // crypto.randomInt is uniform and cryptographically strong
-  return crypto.randomInt(100000, 999999).toString();
-}
 
 /**
  * Generate a secure random auth token (hex string).
@@ -57,62 +54,47 @@ function toSafeUser(user) {
 }
 
 /**
- * Register a new user and generate a verification code for them.
- * Throws if a user with that email already exists.
+ * Issue a fresh one-click login token for a user and persist it
+ * (reusing the verificationcode/vcexpierytime columns).
  *
- * @param {Object} params
- * @param {string} params.email
- * @param {string} [params.username]
- * @returns {Promise<{ user: Object, verificationCode: string }>}
+ * @param {Object} user - a user row with at least `email`
+ * @returns {Promise<{ user: Object, loginToken: string }>}
  */
-async function registerUser({ email, username }) {
+async function issueLoginToken(user) {
+  const loginToken = generateAuthToken();
+  const expiry = minutesFromNow(LOGIN_TOKEN_TTL_MINUTES);
+  const updated = await usersDataLayer.setVerificationCode(user.email, loginToken, expiry);
+  return { user: toSafeUser(updated), loginToken };
+}
+
+/**
+ * Request a one-click login link for an email. Creates the account on
+ * the fly if one doesn't already exist for that email — there is no
+ * separate "register" step and no way for the caller to tell which case
+ * happened (same shape either way).
+ *
+ * @param {string} email
+ * @returns {Promise<{ user: Object, loginToken: string }>}
+ */
+async function requestLogin(email) {
   if (!email) {
     throw new Error('email is required');
   }
 
-  const existing = await usersDataLayer.getUserByEmail(email);
-  if (existing) {
-    throw new Error('A user with this email already exists');
+  let user = await usersDataLayer.getUserByEmail(email);
+  if (!user) {
+    user = await usersDataLayer.createUser({ email });
   }
 
-  const verificationCode = generateVerificationCode();
-  const vcExpiry = minutesFromNow(VERIFICATION_CODE_TTL_MINUTES);
-
-  const user = await usersDataLayer.createUser({
-    email,
-    username,
-    verificationcode: verificationCode,
-    vcexpierytime: vcExpiry,
-  });
-
-  // Return the plaintext code so the caller (e.g. a controller) can email it.
-  // It is NOT included in toSafeUser's output.
-  return { user: toSafeUser(user), verificationCode };
+  // Return the plaintext token so the caller (e.g. a controller) can
+  // email it. It is NOT included in toSafeUser's output.
+  return issueLoginToken(user);
 }
 
 /**
- * Issue a fresh verification code for a user who needs to re-verify
- * (e.g. their original code expired, or they never received the email).
- *
- * @param {string} email
- * @returns {Promise<{ user: Object, verificationCode: string }>}
- */
-async function resendVerificationCode(email) {
-  const existing = await usersDataLayer.getUserByEmail(email);
-  if (!existing) {
-    throw new Error('No user found with this email');
-  }
-
-  const verificationCode = generateVerificationCode();
-  const vcExpiry = minutesFromNow(VERIFICATION_CODE_TTL_MINUTES);
-
-  const user = await usersDataLayer.setVerificationCode(email, verificationCode, vcExpiry);
-  return { user: toSafeUser(user), verificationCode };
-}
-
-/**
- * Verify a user's email using their verification code.
- * On success: clears the code and issues a new auth token.
+ * Verify a user's one-click login token (the `code` param holds the
+ * token from the emailed login link).
+ * On success: clears the token and issues a new auth token.
  *
  * @param {string} email
  * @param {string} code
@@ -227,15 +209,13 @@ async function updateProfile(email, fields) {
 }
 
 module.exports = {
-  registerUser,
-  resendVerificationCode,
+  requestLogin,
   verifyEmail,
   validateAuthToken,
   logout,
   getProfile,
   updateProfile,
   // exported for testing/reuse
-  generateVerificationCode,
   generateAuthToken,
   toSafeUser,
 };

@@ -1,6 +1,34 @@
 const http = require('http');
 const WebSocket = require('ws');
 const createWebSocketServer = require('../multiplayer/websocketServer');
+const pool = require('../data/db');
+const usersService = require('../service/usersService');
+
+// The WebSocket server now requires a logged-in email+authToken on the
+// connection URL (see multiplayer/websocketServer.js's 'upgrade' handler),
+// so every test connection needs real credentials from a real user row.
+// This suite therefore talks to the same real Postgres DB
+// usersService.test.js does — see that file for setup notes.
+const TEST_PREFIX = `jest_ws_${Date.now()}`;
+let emailCounter = 0;
+const createdEmails = [];
+
+function uniqueEmail(label) {
+  emailCounter += 1;
+  const email = `${TEST_PREFIX}_${label}_${emailCounter}@example.com`;
+  createdEmails.push(email);
+  return email;
+}
+
+// Logs a fresh test user in for real (via the same service functions the
+// HTTP /users/login + /users/verify routes use) and connects with the
+// resulting credentials on the URL, exactly as the frontend does.
+async function authedConnect(url, email) {
+  const { loginToken } = await usersService.requestLogin(email);
+  const { authToken } = await usersService.verifyEmail(email, loginToken);
+  const authedUrl = `${url}?email=${encodeURIComponent(email)}&token=${encodeURIComponent(authToken)}`;
+  return connect(authedUrl);
+}
 
 function nextMessage(socket) {
   return new Promise((resolve, reject) => {
@@ -115,6 +143,12 @@ describe('multiplayer WebSocket server', () => {
   let websocketServer;
   let url;
 
+  beforeAll(async () => {
+    // Sanity check: make sure we can actually reach the DB before running
+    // anything, since every connection now authenticates against it.
+    await pool.query('SELECT 1;');
+  });
+
   beforeAll(done => {
     server = http.createServer();
     websocketServer = createWebSocketServer(server);
@@ -128,8 +162,15 @@ describe('multiplayer WebSocket server', () => {
     websocketServer.close(() => server.close(done));
   });
 
+  afterAll(async () => {
+    if (createdEmails.length > 0) {
+      await pool.query('DELETE FROM public.users WHERE email = ANY($1::text[]);', [createdEmails]);
+    }
+    await pool.end();
+  });
+
   it('publishes created lobbies in the room list', async () => {
-    const { socket: firstSocket } = await connect(url);
+    const { socket: firstSocket } = await authedConnect(url, uniqueEmail('firstSocket'));
     const firstConnected = await sendAndWait(firstSocket, { type: 'list_rooms' });
     expect(firstConnected.type).toBe('rooms_list');
 
@@ -140,7 +181,7 @@ describe('multiplayer WebSocket server', () => {
       maxPlayers: 4,
     });
 
-    const { socket: secondSocket } = await connect(url);
+    const { socket: secondSocket } = await authedConnect(url, uniqueEmail('secondSocket'));
     const secondList = await sendAndWait(secondSocket, { type: 'list_rooms' });
 
     expect(secondList.type).toBe('rooms_list');
@@ -161,7 +202,7 @@ describe('multiplayer WebSocket server', () => {
   });
 
   it('creates a named lobby and allows direct room-code joining', async () => {
-    const { socket: playerOneSocket } = await connect(url);
+    const { socket: playerOneSocket } = await authedConnect(url, uniqueEmail('playerOneSocket'));
     const created = await sendAndWait(playerOneSocket, {
       type: 'create_room',
       playerName: 'One',
@@ -178,7 +219,7 @@ describe('multiplayer WebSocket server', () => {
       status: 'lobby',
     }));
 
-    const { socket: playerTwoSocket } = await connect(url);
+    const { socket: playerTwoSocket } = await authedConnect(url, uniqueEmail('playerTwoSocket'));
     const joined = await sendAndWait(playerTwoSocket, {
       type: 'join_room',
       roomId: 'sat123',
@@ -194,7 +235,7 @@ describe('multiplayer WebSocket server', () => {
   });
 
   it('sets ready and not-ready status for a room member', async () => {
-    const { socket } = await connect(url);
+    const { socket } = await authedConnect(url, uniqueEmail('socket'));
     const created = await sendAndWait(socket, {
       type: 'create_room',
       playerName: 'Ready Player',
@@ -219,7 +260,7 @@ describe('multiplayer WebSocket server', () => {
   });
 
   it('rejects invalid ready values and players outside a room', async () => {
-    const { socket } = await connect(url);
+    const { socket } = await authedConnect(url, uniqueEmail('socket'));
 
     const outsideRoom = await sendAndWait(socket, { type: 'set_ready', ready: true });
     expect(outsideRoom).toEqual({ type: 'error', message: 'player is not in a room' });
@@ -237,14 +278,14 @@ describe('multiplayer WebSocket server', () => {
   });
 
   it('broadcasts ready changes to other room members', async () => {
-    const { socket: ownerSocket } = await connect(url);
+    const { socket: ownerSocket } = await authedConnect(url, uniqueEmail('ownerSocket'));
     await sendAndWait(ownerSocket, {
       type: 'create_room',
       playerName: 'Owner',
       code: 'READY3',
     });
 
-    const { socket: memberSocket } = await connect(url);
+    const { socket: memberSocket } = await authedConnect(url, uniqueEmail('memberSocket'));
     await sendAndWait(memberSocket, {
       type: 'join_room',
       roomId: 'READY3',
@@ -273,7 +314,7 @@ describe('multiplayer WebSocket server', () => {
   });
 
   it('returns room state to a member and rejects clients outside the room', async () => {
-    const { socket: ownerSocket } = await connect(url);
+    const { socket: ownerSocket } = await authedConnect(url, uniqueEmail('ownerSocket'));
     await sendAndWait(ownerSocket, {
       type: 'create_room',
       playerName: 'Owner',
@@ -295,7 +336,7 @@ describe('multiplayer WebSocket server', () => {
     }));
     expect(roomState.room).not.toHaveProperty('roomId');
 
-    const { socket: outsideSocket } = await connect(url);
+    const { socket: outsideSocket } = await authedConnect(url, uniqueEmail('outsideSocket'));
     const rejected = await sendAndWait(outsideSocket, { type: 'get_room' });
     expect(rejected).toEqual({ type: 'error', message: 'player is not in a room' });
     const leaveRejected = await sendAndWait(outsideSocket, { type: 'leave_room' });
@@ -306,14 +347,14 @@ describe('multiplayer WebSocket server', () => {
   });
 
   it('allows a member to leave, transfers ownership, and removes an empty room', async () => {
-    const { socket: ownerSocket } = await connect(url);
+    const { socket: ownerSocket } = await authedConnect(url, uniqueEmail('ownerSocket'));
     await sendAndWait(ownerSocket, {
       type: 'create_room',
       playerName: 'Owner',
       code: 'LEAVE1',
     });
 
-    const { socket: memberSocket } = await connect(url);
+    const { socket: memberSocket } = await authedConnect(url, uniqueEmail('memberSocket'));
     const joined = await sendAndWait(memberSocket, {
       type: 'join_room',
       roomId: 'LEAVE1',
@@ -340,7 +381,7 @@ describe('multiplayer WebSocket server', () => {
     );
     expect(memberLeft.roomId).toBe('LEAVE1');
 
-    const { socket: observerSocket } = await connect(url);
+    const { socket: observerSocket } = await authedConnect(url, uniqueEmail('observerSocket'));
     const roomList = await sendAndWaitForType(
       observerSocket,
       { type: 'list_rooms' },
@@ -356,14 +397,14 @@ describe('multiplayer WebSocket server', () => {
   });
 
   it('returns every room player with status, score, and owner state', async () => {
-    const { socket: ownerSocket } = await connect(url);
+    const { socket: ownerSocket } = await authedConnect(url, uniqueEmail('ownerSocket'));
     const created = await sendAndWait(ownerSocket, {
       type: 'create_room',
       playerName: 'Owner',
       code: 'LIST01',
     });
 
-    const { socket: memberSocket } = await connect(url);
+    const { socket: memberSocket } = await authedConnect(url, uniqueEmail('memberSocket'));
     const joined = await sendAndWait(memberSocket, {
       type: 'join_room',
       roomId: 'LIST01',
@@ -400,7 +441,7 @@ describe('multiplayer WebSocket server', () => {
   });
 
   it('rejects player-list requests from clients outside a room', async () => {
-    const { socket } = await connect(url);
+    const { socket } = await authedConnect(url, uniqueEmail('socket'));
 
     const response = await sendAndWait(socket, { type: 'get_players' });
 
@@ -409,7 +450,7 @@ describe('multiplayer WebSocket server', () => {
   });
 
   it('enforces owner-only player management and notifies the room after a kick', async () => {
-    const { socket: ownerSocket } = await connect(url);
+    const { socket: ownerSocket } = await authedConnect(url, uniqueEmail('ownerSocket'));
     const created = await sendAndWait(ownerSocket, {
       type: 'create_room',
       playerName: 'Owner',
@@ -417,14 +458,14 @@ describe('multiplayer WebSocket server', () => {
       maxPlayers: 4,
     });
 
-    const { socket: targetSocket } = await connect(url);
+    const { socket: targetSocket } = await authedConnect(url, uniqueEmail('targetSocket'));
     const targetJoined = await sendAndWait(targetSocket, {
       type: 'join_room',
       roomId: 'KICK01',
       name: 'Target',
     });
 
-    const { socket: memberSocket } = await connect(url);
+    const { socket: memberSocket } = await authedConnect(url, uniqueEmail('memberSocket'));
     await sendAndWait(memberSocket, {
       type: 'join_room',
       roomId: 'KICK01',
@@ -497,7 +538,7 @@ describe('multiplayer WebSocket server', () => {
   });
 
   it('bans a player and blocks them from rejoining that owner\'s rooms afterward', async () => {
-    const { socket: ownerSocket } = await connect(url);
+    const { socket: ownerSocket } = await authedConnect(url, uniqueEmail('ownerSocket'));
     const created = await sendAndWait(ownerSocket, {
       type: 'create_room',
       playerName: 'Owner',
@@ -505,7 +546,7 @@ describe('multiplayer WebSocket server', () => {
       maxPlayers: 4,
     });
 
-    const { socket: targetSocket } = await connect(url);
+    const { socket: targetSocket } = await authedConnect(url, uniqueEmail('targetSocket'));
     const targetJoined = await sendAndWait(targetSocket, {
       type: 'join_room',
       roomId: 'BAN01',
@@ -552,7 +593,7 @@ describe('multiplayer WebSocket server', () => {
   });
 
   it('rejects player-management requests from clients outside a room', async () => {
-    const { socket } = await connect(url);
+    const { socket } = await authedConnect(url, uniqueEmail('socket'));
 
     const response = await sendAndWait(socket, {
       type: 'manage_player',
@@ -565,14 +606,14 @@ describe('multiplayer WebSocket server', () => {
   });
 
   it('allows room discovery and joining after an owner disconnects', async () => {
-    const { socket: ownerSocket } = await connect(url);
+    const { socket: ownerSocket } = await authedConnect(url, uniqueEmail('ownerSocket'));
     await sendAndWait(ownerSocket, {
       type: 'create_room',
       owner: 'Owner',
       code: 'REJOIN1',
     });
 
-    const { socket: remainingSocket } = await connect(url);
+    const { socket: remainingSocket } = await authedConnect(url, uniqueEmail('remainingSocket'));
     await sendAndWait(remainingSocket, {
       type: 'join_room',
       roomId: 'REJOIN1',
@@ -589,7 +630,7 @@ describe('multiplayer WebSocket server', () => {
       disconnectUpdate.room.players[0].player.id,
     );
 
-    const { socket: joiningSocket } = await connect(url);
+    const { socket: joiningSocket } = await authedConnect(url, uniqueEmail('joiningSocket'));
     const roomList = await sendAndWait(joiningSocket, { type: 'list_rooms' });
     expect(roomList.rooms).toEqual(expect.arrayContaining([
       expect.objectContaining({ roomId: 'REJOIN1', playerCount: 1 }),
@@ -607,7 +648,7 @@ describe('multiplayer WebSocket server', () => {
   });
 
   it('prevents one player from creating more than one lobby', async () => {
-    const { socket } = await connect(url);
+    const { socket } = await authedConnect(url, uniqueEmail('socket'));
     await sendAndWait(socket, {
       type: 'create_room',
       owner: 'Owner',
@@ -625,14 +666,14 @@ describe('multiplayer WebSocket server', () => {
   });
 
   it('prevents a room member from joining another lobby', async () => {
-    const { socket: ownerSocket } = await connect(url);
+    const { socket: ownerSocket } = await authedConnect(url, uniqueEmail('ownerSocket'));
     await sendAndWait(ownerSocket, {
       type: 'create_room',
       owner: 'Owner',
       code: 'MEMBER1',
     });
 
-    const { socket: otherSocket } = await connect(url);
+    const { socket: otherSocket } = await authedConnect(url, uniqueEmail('otherSocket'));
     await sendAndWait(otherSocket, {
       type: 'create_room',
       owner: 'Other',
@@ -651,14 +692,14 @@ describe('multiplayer WebSocket server', () => {
   });
 
   it('prevents a room member from creating another lobby', async () => {
-    const { socket: ownerSocket } = await connect(url);
+    const { socket: ownerSocket } = await authedConnect(url, uniqueEmail('ownerSocket'));
     await sendAndWait(ownerSocket, {
       type: 'create_room',
       owner: 'Owner',
       code: 'JOINED1',
     });
 
-    const { socket: memberSocket } = await connect(url);
+    const { socket: memberSocket } = await authedConnect(url, uniqueEmail('memberSocket'));
     await sendAndWait(memberSocket, {
       type: 'join_room',
       roomId: 'JOINED1',
@@ -677,7 +718,7 @@ describe('multiplayer WebSocket server', () => {
   });
 
   it('searches for a lobby by code without joining it', async () => {
-    const { socket: ownerSocket } = await connect(url);
+    const { socket: ownerSocket } = await authedConnect(url, uniqueEmail('ownerSocket'));
     await sendAndWait(ownerSocket, {
       type: 'create_room',
       playerName: 'Owner',
@@ -686,7 +727,7 @@ describe('multiplayer WebSocket server', () => {
       code: 'LOOKUP1',
     });
 
-    const { socket: searchSocket } = await connect(url);
+    const { socket: searchSocket } = await authedConnect(url, uniqueEmail('searchSocket'));
     const found = await sendAndWait(searchSocket, {
       type: 'search_room',
       roomId: 'lookup1',
@@ -706,7 +747,7 @@ describe('multiplayer WebSocket server', () => {
   });
 
   it('returns an error when searching for an unknown room code', async () => {
-    const { socket } = await connect(url);
+    const { socket } = await authedConnect(url, uniqueEmail('socket'));
     const response = await sendAndWait(socket, {
       type: 'search_room',
       code: 'MISSING',
@@ -717,7 +758,7 @@ describe('multiplayer WebSocket server', () => {
   });
 
   it('allows the room owner to delete a lobby', async () => {
-    const { socket: ownerSocket } = await connect(url);
+    const { socket: ownerSocket } = await authedConnect(url, uniqueEmail('ownerSocket'));
     await sendAndWait(ownerSocket, {
       type: 'create_room',
       playerName: 'Owner',
@@ -740,14 +781,14 @@ describe('multiplayer WebSocket server', () => {
   });
 
   it('prevents a non-owner from deleting a lobby', async () => {
-    const { socket: ownerSocket } = await connect(url);
+    const { socket: ownerSocket } = await authedConnect(url, uniqueEmail('ownerSocket'));
     await sendAndWait(ownerSocket, {
       type: 'create_room',
       playerName: 'Owner',
       code: 'NODELETE',
     });
 
-    const { socket: memberSocket } = await connect(url);
+    const { socket: memberSocket } = await authedConnect(url, uniqueEmail('memberSocket'));
     await sendAndWait(memberSocket, {
       type: 'join_room',
       roomId: 'NODELETE',
@@ -768,17 +809,17 @@ describe('multiplayer WebSocket server', () => {
   });
 
   it('rejects a third player when a lobby reaches capacity', async () => {
-    const { socket: ownerSocket } = await connect(url);
+    const { socket: ownerSocket } = await authedConnect(url, uniqueEmail('ownerSocket'));
     const created = await sendAndWait(ownerSocket, {
       type: 'create_room',
       playerName: 'Owner',
       maxPlayers: 2,
       code: 'FULL99',
     });
-    const { socket: secondSocket } = await connect(url);
+    const { socket: secondSocket } = await authedConnect(url, uniqueEmail('secondSocket'));
     await sendAndWait(secondSocket, { type: 'join_room', roomId: created.roomId, name: 'Two' });
 
-    const { socket: thirdSocket } = await connect(url);
+    const { socket: thirdSocket } = await authedConnect(url, uniqueEmail('thirdSocket'));
     const rejected = await sendAndWait(thirdSocket, {
       type: 'join_room',
       roomId: created.roomId,

@@ -20,6 +20,18 @@
     {
       "key": "targetPlayerId",
       "value": "PASTE_A_PLAYER_ID_HERE"
+    },
+    {
+      "key": "loginEmail",
+      "value": "you@example.com"
+    },
+    {
+      "key": "loginToken",
+      "value": "PASTE_TOKEN_FROM_THE_EMAILED_LINK_HERE"
+    },
+    {
+      "key": "authToken",
+      "value": "PASTE_AUTHTOKEN_FROM_VERIFY_RESPONSE_HERE"
     }
   ],
   "item": [
@@ -42,8 +54,34 @@
       }
     },
     {
+      "name": "Login (get credentials)",
+      "description": "Real HTTP request — send this one normally. Creates the account on the fly if the email is new. Emails a one-click login link; the link's token is NOT in this response. Copy the token out of the emailed link's URL (?token=...) into the loginToken variable, then run 'Verify Login Token' next.",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{loginEmail}}\"\n}"
+        },
+        "url": "http://{{host}}:{{port}}/users/login"
+      }
+    },
+    {
+      "name": "Verify Login Token (get authToken)",
+      "description": "Real HTTP request — send this one normally, after pasting the token from the emailed link into the loginToken variable. Response's authToken is what the WebSocket connection below needs.",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{loginEmail}}\",\n  \"token\": \"{{loginToken}}\"\n}"
+        },
+        "url": "http://{{host}}:{{port}}/users/verify"
+      }
+    },
+    {
       "name": "Lobby WebSocket",
-      "description": "Open a new Postman WebSocket request manually using this URL:\n\nws://{{host}}:{{port}}/multiplayer\n\nPostman collections treat WebSocket entries as HTTP requests during import, so this item is documentation-only. After connecting, send the message payloads from the items below in the WebSocket message panel."
+      "description": "Open a new Postman WebSocket request manually using this URL (the server now requires login credentials on every connection — run 'Login' + 'Verify Login Token' above first, then paste the resulting authToken into the authToken variable):\n\nws://{{host}}:{{port}}/multiplayer?email={{loginEmail}}&token={{authToken}}\n\nA missing or invalid email/token pair gets the connection rejected before it ever opens — no error message frame, the WebSocket just fails to connect. Postman collections treat WebSocket entries as HTTP requests during import, so this item is documentation-only. After connecting, send the message payloads from the items below in the WebSocket message panel."
     },
     {
       "name": "Create Room Message",

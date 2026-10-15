@@ -1,0 +1,7 @@
+{
+  "subject": "Hello {{name}}!",
+  "recipients": [
+    { "email": "tunc.kiral@gmail.com", "name": "Tim" },
+    { "email": "avimal5000@gmail.com", "name": "Avi" }
+  ]
+}

@@ -33,76 +33,51 @@ afterAll(async () => {
   await pool.end();
 });
 
-describe('registerUser', () => {
-  it('creates a user and returns a verification code', async () => {
-    const email = uniqueEmail('register');
+describe('requestLogin', () => {
+  it('creates a user on the fly and returns a login token', async () => {
+    const email = uniqueEmail('login_new');
 
-    const { user, verificationCode } = await usersService.registerUser({
-      email,
-      username: 'newuser',
-    });
+    const { user, loginToken } = await usersService.requestLogin(email);
 
     expect(user.email).toBe(email);
-    expect(user.username).toBe('newuser');
-    expect(verificationCode).toMatch(/^\d{6}$/);
+    expect(loginToken).toMatch(/^[0-9a-f]{64}$/);
 
-    // Safe user should never expose the raw code/token fields
+    // Safe user should never expose the raw token fields
     expect(user.verificationcode).toBeUndefined();
     expect(user.authenticationtoken).toBeUndefined();
 
-    // But the code should actually be persisted in the DB
+    // But the token should actually be persisted in the DB
     const raw = await usersDataLayer.getUserByEmail(email);
-    expect(raw.verificationcode).toBe(verificationCode);
+    expect(raw.verificationcode).toBe(loginToken);
     expect(raw.vcexpierytime).toBeTruthy();
   });
 
   it('throws if email is missing', async () => {
-    await expect(usersService.registerUser({ username: 'no_email' })).rejects.toThrow(
-      'email is required'
-    );
+    await expect(usersService.requestLogin()).rejects.toThrow('email is required');
   });
 
-  it('throws if a user with that email already exists', async () => {
-    const email = uniqueEmail('duplicate');
-    await usersService.registerUser({ email, username: 'first' });
+  it('issues a fresh token for an existing user instead of erroring or duplicating', async () => {
+    const email = uniqueEmail('login_existing');
+    const { loginToken: firstToken } = await usersService.requestLogin(email);
 
-    await expect(usersService.registerUser({ email, username: 'second' })).rejects.toThrow(
-      'A user with this email already exists'
-    );
-  });
-});
+    const { user, loginToken: secondToken } = await usersService.requestLogin(email);
 
-describe('resendVerificationCode', () => {
-  it('issues a new code for an existing user', async () => {
-    const email = uniqueEmail('resend');
-    const { verificationCode: firstCode } = await usersService.registerUser({ email });
+    expect(user.email).toBe(email);
+    expect(secondToken).toMatch(/^[0-9a-f]{64}$/);
+    expect(secondToken).not.toBe(firstToken);
 
-    const { verificationCode: secondCode } = await usersService.resendVerificationCode(email);
-
-    expect(secondCode).toMatch(/^\d{6}$/);
-    // Extremely unlikely to collide, but the important guarantee is that
-    // the DB now reflects the second code, not the first
+    // The DB now reflects the second token, not the first
     const raw = await usersDataLayer.getUserByEmail(email);
-    expect(raw.verificationcode).toBe(secondCode);
-    if (firstCode === secondCode) {
-      // astronomically unlikely; not a real failure, just noting it
-      console.warn('Generated codes collided by chance');
-    }
-  });
-
-  it('throws if no user exists with that email', async () => {
-    await expect(usersService.resendVerificationCode('nope_999@example.com')).rejects.toThrow(
-      'No user found with this email'
-    );
+    expect(raw.verificationcode).toBe(secondToken);
   });
 });
 
 describe('verifyEmail', () => {
-  it('verifies a correct, unexpired code and issues an auth token', async () => {
+  it('verifies a correct, unexpired token and issues an auth token', async () => {
     const email = uniqueEmail('verify_success');
-    const { verificationCode } = await usersService.registerUser({ email });
+    const { loginToken } = await usersService.requestLogin(email);
 
-    const { user, authToken } = await usersService.verifyEmail(email, verificationCode);
+    const { user, authToken } = await usersService.verifyEmail(email, loginToken);
 
     expect(authToken).toMatch(/^[0-9a-f]{64}$/);
     expect(user.email).toBe(email);
@@ -117,42 +92,42 @@ describe('verifyEmail', () => {
     expect(raw.atexpirerytime).toBeTruthy();
   });
 
-  it('throws for an incorrect code', async () => {
-    const email = uniqueEmail('verify_wrong_code');
-    await usersService.registerUser({ email });
+  it('throws for an incorrect token', async () => {
+    const email = uniqueEmail('verify_wrong_token');
+    await usersService.requestLogin(email);
 
-    await expect(usersService.verifyEmail(email, '000000')).rejects.toThrow(
+    await expect(usersService.verifyEmail(email, 'not-the-right-token')).rejects.toThrow(
       'Invalid verification code'
     );
   });
 
-  it('throws for an expired code', async () => {
+  it('throws for an expired token', async () => {
     const email = uniqueEmail('verify_expired');
-    const { verificationCode } = await usersService.registerUser({ email });
+    const { loginToken } = await usersService.requestLogin(email);
 
-    // Manually expire the code by setting vcexpierytime in the past
+    // Manually expire the token by setting vcexpierytime in the past
     await usersDataLayer.setVerificationCode(
       email,
-      verificationCode,
+      loginToken,
       new Date(Date.now() - 60 * 1000)
     );
 
-    await expect(usersService.verifyEmail(email, verificationCode)).rejects.toThrow(
+    await expect(usersService.verifyEmail(email, loginToken)).rejects.toThrow(
       'Verification code has expired'
     );
   });
 
-  it('throws if no code is pending', async () => {
-    const email = uniqueEmail('verify_no_code');
-    await usersDataLayer.createUser({ email }); // no verification code set
+  it('throws if no token is pending', async () => {
+    const email = uniqueEmail('verify_no_token');
+    await usersDataLayer.createUser({ email }); // no login token set
 
-    await expect(usersService.verifyEmail(email, '123456')).rejects.toThrow(
+    await expect(usersService.verifyEmail(email, 'anything')).rejects.toThrow(
       'No verification code is pending for this user'
     );
   });
 
   it('throws if the user does not exist', async () => {
-    await expect(usersService.verifyEmail('nope_999@example.com', '123456')).rejects.toThrow(
+    await expect(usersService.verifyEmail('nope_999@example.com', 'anything')).rejects.toThrow(
       'No user found with this email'
     );
   });
@@ -161,8 +136,8 @@ describe('verifyEmail', () => {
 describe('validateAuthToken', () => {
   it('validates a correct, unexpired token', async () => {
     const email = uniqueEmail('token_valid');
-    const { verificationCode } = await usersService.registerUser({ email });
-    const { authToken } = await usersService.verifyEmail(email, verificationCode);
+    const { loginToken } = await usersService.requestLogin(email);
+    const { authToken } = await usersService.verifyEmail(email, loginToken);
 
     const user = await usersService.validateAuthToken(email, authToken);
 
@@ -172,8 +147,8 @@ describe('validateAuthToken', () => {
 
   it('throws for an incorrect token', async () => {
     const email = uniqueEmail('token_wrong');
-    const { verificationCode } = await usersService.registerUser({ email });
-    await usersService.verifyEmail(email, verificationCode);
+    const { loginToken } = await usersService.requestLogin(email);
+    await usersService.verifyEmail(email, loginToken);
 
     await expect(usersService.validateAuthToken(email, 'wrong-token')).rejects.toThrow(
       'Invalid auth token'
@@ -209,8 +184,8 @@ describe('validateAuthToken', () => {
 describe('logout', () => {
   it('clears the auth token', async () => {
     const email = uniqueEmail('logout');
-    const { verificationCode } = await usersService.registerUser({ email });
-    const { authToken } = await usersService.verifyEmail(email, verificationCode);
+    const { loginToken } = await usersService.requestLogin(email);
+    const { authToken } = await usersService.verifyEmail(email, loginToken);
 
     await usersService.logout(email);
 
@@ -229,7 +204,7 @@ describe('logout', () => {
 describe('getProfile', () => {
   it('returns a safe view of an existing user', async () => {
     const email = uniqueEmail('profile_get');
-    await usersService.registerUser({ email, username: 'profileuser' });
+    await usersDataLayer.createUser({ email, username: 'profileuser' });
 
     const profile = await usersService.getProfile(email);
 
@@ -248,7 +223,7 @@ describe('getProfile', () => {
 describe('updateProfile', () => {
   it('updates the username', async () => {
     const email = uniqueEmail('profile_update');
-    await usersService.registerUser({ email, username: 'old_name' });
+    await usersDataLayer.createUser({ email, username: 'old_name' });
 
     const updated = await usersService.updateProfile(email, { username: 'new_name' });
 
@@ -257,7 +232,7 @@ describe('updateProfile', () => {
 
   it('throws if no valid fields are provided', async () => {
     const email = uniqueEmail('profile_update_empty');
-    await usersService.registerUser({ email });
+    await usersService.requestLogin(email);
 
     await expect(usersService.updateProfile(email, {})).rejects.toThrow(
       'No valid profile fields provided to update'
@@ -271,12 +246,7 @@ describe('updateProfile', () => {
   });
 });
 
-describe('token/code generators', () => {
-  it('generateVerificationCode produces a 6-digit numeric string', () => {
-    const code = usersService.generateVerificationCode();
-    expect(code).toMatch(/^\d{6}$/);
-  });
-
+describe('token generators', () => {
   it('generateAuthToken produces a 64-character hex string', () => {
     const token = usersService.generateAuthToken();
     expect(token).toMatch(/^[0-9a-f]{64}$/);

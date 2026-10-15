@@ -3,9 +3,12 @@ const { WebSocketServer } = WebSocket;
 const crypto = require('crypto');
 const LobbyManager = require('./lobbyManager');
 const RoomManager = require('./roomManager');
+const usersService = require('./../service/usersService');
+
+const MULTIPLAYER_PATH = '/multiplayer';
 
 function playerCount(room) {
-  return room.players instanceof Map ? room.players.size : room.players.length;
+  return room.players.length;
 }
 
 function send(socket, type, payload = {}) {
@@ -59,16 +62,46 @@ function ensurePlayerIsNotInRoom(sockets, socket) {
 function createWebSocketServer(server) {
   const rooms = new LobbyManager();
   const sockets = new Map();
-  const websocketServer = new WebSocketServer({ server, path: '/multiplayer' });
+  // noServer: auth happens on the raw HTTP upgrade below, before a
+  // WebSocket connection is ever established — see server.on('upgrade').
+  const websocketServer = new WebSocketServer({ noServer: true });
 
   sockets.getRoomList = () => rooms.rooms;
 
-  websocketServer.on('connection', socket => {
-    const player = { id: crypto.randomUUID(), name: 'Player' };
+  server.on('upgrade', async (request, socket, head) => {
+    const { pathname, searchParams } = new URL(request.url, 'http://localhost');
+
+    if (pathname !== MULTIPLAYER_PATH) {
+      socket.destroy();
+      return;
+    }
+
+    const email = searchParams.get('email');
+    const token = searchParams.get('token');
+
+    let user;
+    try {
+      if (!email || !token) {
+        throw new Error('Missing credentials');
+      }
+      user = await usersService.validateAuthToken(email, token);
+    } catch {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    websocketServer.handleUpgrade(request, socket, head, ws => {
+      websocketServer.emit('connection', ws, request, user);
+    });
+  });
+
+  websocketServer.on('connection', (socket, request, user) => {
+    const player = { id: crypto.randomUUID(), name: user.username || user.email, email: user.email };
     let roomId = null;
     sockets.set(socket, { roomId: null, playerId: player.id });
 
-    send(socket, 'connected', { playerId: player.id });
+    send(socket, 'connected', { playerId: player.id, email: player.email });
 
     socket.on('message', rawMessage => {
       let message;

@@ -23,7 +23,7 @@ class LobbyManager {
       name: String(name).trim() || 'Lobby',
       maxPlayers: this.normalizeMaxPlayers(maxPlayers),
       status: GameStatus.LOBBY,
-      players: new Map(),
+      players: [],
       game: null,
       type_of_game: 1
     };
@@ -84,20 +84,12 @@ class LobbyManager {
     if (this.isBannedByOwner(room.ownerId, player.id)) {
       throw new Error('player is banned from this room');
     }
-    const playersAreMapped = room.players instanceof Map;
-    const existingPlayer = playersAreMapped
-      ? room.players.has(player.id)
-      : room.players.some(entry => (entry.player ?? entry).id === player.id);
+    const existingPlayer = room.players.some(entry => (entry.player ?? entry).id === player.id);
     if (existingPlayer) return room;
     if (room.status !== GameStatus.LOBBY) throw new Error('room is no longer accepting players');
-    const playerCount = playersAreMapped ? room.players.size : room.players.length;
-    if (playerCount >= room.maxPlayers) throw new Error('room is full');
+    if (room.players.length >= room.maxPlayers) throw new Error('room is full');
 
-    if (playersAreMapped) {
-      room.players.set(player.id, player);
-    } else {
-      room.players.push({ player, status: 'not_ready', score: 0 });
-    }
+    room.players.push({ player, status: 'not_ready', score: 0 });
     return room;
   }
 

@@ -6,7 +6,9 @@ import MultiplayerLobby from './components/multiplayer/MultiplayerLobby.jsx'
 const ACTIVE_ROOM_KEY = 'relay-active-room'
 const TOAST_STORAGE_KEY = 'relay-room-toast'
 const LEGACY_ROOM_STORAGE_KEY = 'relay-open-rooms'
+const AUTH_STORAGE_KEY = 'relay-auth'
 const SOCKET_URL = 'ws://localhost:3000/multiplayer'
+const API_URL = 'http://localhost:3000'
 
 function readActiveRoomFromStorage() {
   try {
@@ -43,6 +45,27 @@ function writeToastToStorage(toast) {
   }
 }
 
+function readAuthFromStorage() {
+  try {
+    const raw = localStorage.getItem(AUTH_STORAGE_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+function writeAuthToStorage(auth) {
+  try {
+    if (auth && auth.email && auth.authToken) {
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth))
+    } else {
+      localStorage.removeItem(AUTH_STORAGE_KEY)
+    }
+  } catch {
+    // ignore storage write errors in private browser modes
+  }
+}
+
 function createRoomCode() {
   const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
   const digits = '0123456789'
@@ -52,11 +75,14 @@ function createRoomCode() {
 }
 
 function App() {
-  const [screen, setScreen] = useState('menu')
+  const [auth, setAuth] = useState(() => readAuthFromStorage())
+  const [screen, setScreen] = useState(() => (readAuthFromStorage()?.email ? 'menu' : 'login'))
   const [roomId, setRoomId] = useState(() => readActiveRoomFromStorage())
   const [playerName, setPlayerName] = useState('Player')
   const [rooms, setRooms] = useState([])
   const [toast, setToast] = useState(() => readToastFromStorage())
+  const [loginEmail, setLoginEmail] = useState('')
+  const [loginPending, setLoginPending] = useState(false)
   const toastTimerRef = useRef(null)
   const socketRef = useRef(null)
   const roomIdRef = useRef(roomId)
@@ -124,6 +150,87 @@ function App() {
     }, 2500)
   }
 
+  // One-click email login: if the page was opened from the link in a
+  // login email (?token=...&email=...), exchange the token for a real
+  // session, then strip the params so a refresh doesn't retry an
+  // already-consumed, single-use token.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const token = params.get('token')
+    const email = params.get('email')
+    if (!token || !email) return
+
+    let cancelled = false
+
+    fetch(`${API_URL}/users/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, token }),
+    })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(data.error || 'Login link is invalid or expired.')
+        return data
+      })
+      .then((data) => {
+        if (cancelled) return
+        const nextAuth = { email: data.user?.email || email, authToken: data.authToken }
+        setAuth(nextAuth)
+        writeAuthToStorage(nextAuth)
+        setScreen('menu')
+        showToast('Logged in!', 'success')
+      })
+      .catch((err) => {
+        if (cancelled) return
+        showToast(err.message || 'Login link is invalid or expired.', 'error')
+      })
+      .finally(() => {
+        window.history.replaceState({}, '', window.location.pathname)
+      })
+
+    return () => {
+      cancelled = true
+    }
+    // Only ever relevant on the initial page load that carries the link.
+  }, [])
+
+  const handleRequestLoginLink = async (event) => {
+    event.preventDefault()
+    const email = loginEmail.trim()
+    if (!email) {
+      showToast('Enter an email first.', 'error')
+      return
+    }
+
+    setLoginPending(true)
+    try {
+      const response = await fetch(`${API_URL}/users/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Unable to send login link.')
+
+      showToast(
+        data.emailSent === false
+          ? "Couldn't send the email — try again shortly."
+          : 'Check your email for a login link!',
+        data.emailSent === false ? 'error' : 'success'
+      )
+    } catch (err) {
+      showToast(err.message || 'Unable to send login link.', 'error')
+    } finally {
+      setLoginPending(false)
+    }
+  }
+
+  const handleLogout = () => {
+    setAuth(null)
+    writeAuthToStorage(null)
+    setScreen('login')
+  }
+
   useEffect(() => {
     try {
       localStorage.removeItem(LEGACY_ROOM_STORAGE_KEY)
@@ -147,14 +254,21 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (!auth?.email || !auth?.authToken) {
+      return undefined
+    }
+
     if (socketRef.current) {
       return undefined
     }
 
-    const socket = new WebSocket(SOCKET_URL)
+    const socketUrl = `${SOCKET_URL}?email=${encodeURIComponent(auth.email)}&token=${encodeURIComponent(auth.authToken)}`
+    const socket = new WebSocket(socketUrl)
     socketRef.current = socket
+    let didOpen = false
 
     socket.onopen = () => {
+      didOpen = true
       socket.send(JSON.stringify({ type: 'list_rooms' }))
     }
 
@@ -213,20 +327,37 @@ function App() {
     }
 
     socket.onerror = () => {
-      showToast('Unable to connect to multiplayer server.', 'error')
+      // If we never finished opening, this is almost certainly the server
+      // rejecting the login credentials on the connection URL (handled in
+      // onclose below) rather than a generic connectivity problem — don't
+      // double-toast it.
+      if (didOpen) {
+        showToast('Unable to connect to multiplayer server.', 'error')
+      }
     }
 
     socket.onclose = () => {
       socketRef.current = null
+
+      // The browser WebSocket API never exposes *why* a connection failed
+      // (no HTTP status code reaches JS), so "never got to open" is the
+      // only signal available that the server rejected our credentials —
+      // treat it as an expired/invalid session and bounce back to login.
+      if (!didOpen) {
+        setAuth(null)
+        writeAuthToStorage(null)
+        setScreen('login')
+        showToast('Your session expired — please log in again.', 'error')
+      }
     }
 
     return () => {
-      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      if (socketRef.current) {
         socketRef.current.close()
       }
       socketRef.current = null
     }
-  }, [syncRoomsFromServer, syncRoomsListFromServer])
+  }, [auth, syncRoomsFromServer, syncRoomsListFromServer])
 
   useEffect(() => {
     if (!toast.message) return
@@ -295,6 +426,94 @@ function App() {
     setScreen('menu')
     setRoomId('')
     writeActiveRoomToStorage('')
+  }
+
+  if (screen === 'login') {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: '#090611',
+        color: '#f7f1ff',
+        fontFamily: 'Poppins, sans-serif',
+        position: 'relative',
+      }}>
+        {toast.message && (
+          <div style={{
+            position: 'fixed',
+            top: 28,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: toast.type === 'error' ? '#ff5a5f' : '#f5c518',
+            color: toast.type === 'error' ? '#fff5f5' : '#1a1328',
+            borderRadius: 999,
+            padding: '12px 22px',
+            fontWeight: 800,
+            letterSpacing: '0.04em',
+            boxShadow: '0 12px 32px rgba(0,0,0,0.28)',
+            zIndex: 120,
+            whiteSpace: 'nowrap',
+          }}>
+            {toast.message}
+          </div>
+        )}
+        <div style={{
+          width: 'min(92vw, 420px)',
+          background: '#151225',
+          border: '1px solid rgba(255,255,255,0.08)',
+          borderRadius: 24,
+          boxShadow: '0 24px 60px rgba(0,0,0,0.5)',
+          padding: 28,
+        }}>
+          <p style={{ margin: 0, color: '#d5b8ff', letterSpacing: '0.18em', fontSize: 12, textTransform: 'uppercase' }}>
+            Relay Game
+          </p>
+
+          <h1 style={{ margin: '14px 0 10px', fontSize: 36, lineHeight: 1.1 }}>Log in to play</h1>
+
+          <p style={{ margin: '0 0 24px', color: '#c8c2dc', lineHeight: 1.6 }}>
+            Enter your email and we'll send you a one-click login link — no password needed.
+          </p>
+
+          <form onSubmit={handleRequestLoginLink} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <input
+              type="email"
+              value={loginEmail}
+              onChange={(event) => setLoginEmail(event.target.value)}
+              placeholder="you@example.com"
+              autoFocus
+              style={{
+                background: '#0f0c1c',
+                border: '1px solid rgba(255,255,255,0.18)',
+                borderRadius: 10,
+                padding: '14px 16px',
+                color: '#f7f1ff',
+                fontSize: 16,
+              }}
+            />
+            <button
+              type="submit"
+              disabled={loginPending}
+              style={{
+                background: '#f5c518',
+                color: '#1a1328',
+                border: 'none',
+                borderRadius: 12,
+                padding: '16px 18px',
+                fontSize: 16,
+                fontWeight: 800,
+                cursor: loginPending ? 'default' : 'pointer',
+                opacity: loginPending ? 0.6 : 1,
+              }}
+            >
+              {loginPending ? 'Sending…' : 'Log in'}
+            </button>
+          </form>
+        </div>
+      </div>
+    )
   }
 
   if (screen === 'solo') {
@@ -401,6 +620,32 @@ function App() {
           >
             Play Multiplayer
           </button>
+        </div>
+
+        <div style={{
+          marginTop: 24,
+          paddingTop: 20,
+          borderTop: '1px solid rgba(255,255,255,0.08)',
+        }}>
+          <p style={{ margin: 0, color: '#c8c2dc', fontSize: 14 }}>
+            Logged in as <strong style={{ color: '#f7f1ff' }}>{auth?.email}</strong>
+            {' · '}
+            <button
+              type="button"
+              onClick={handleLogout}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#d5b8ff',
+                textDecoration: 'underline',
+                cursor: 'pointer',
+                fontSize: 14,
+                padding: 0,
+              }}
+            >
+              Log out
+            </button>
+          </p>
         </div>
       </div>
     </div>

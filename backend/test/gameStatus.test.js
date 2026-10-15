@@ -1,5 +1,6 @@
 const { GameStatus } = require('../multiplayer/enums');
 const LobbyManager = require('../multiplayer/lobbyManager');
+const RoomManager = require('../multiplayer/roomManager');
 
 describe('GameStatus', () => {
   it('defines the supported room states', () => {
@@ -102,6 +103,33 @@ describe('LobbyManager lobby lifecycle', () => {
 
     expect(() => rooms.joinRoom(secondRoom.id, { id: 'troll', name: 'Troll' }))
       .toThrow('player is banned from this room');
+  });
+
+  it('keeps room.players a plain array across repeated RoomManager construction (Step 2 regression)', () => {
+    const rooms = new LobbyManager();
+    const room = rooms.createRoom({ ownerId: 'p1' });
+    rooms.joinRoom(room.id, { id: 'p1', name: 'Owner' });
+    rooms.joinRoom(room.id, { id: 'p2', name: 'Member' });
+
+    expect(Array.isArray(room.players)).toBe(true);
+    expect(room.players).toHaveLength(2);
+
+    // Simulate the sequence of separate WebSocket messages, each of which
+    // constructs a brand-new RoomManager against the same stored room.
+    new RoomManager(room).getRoomState();
+    expect(Array.isArray(room.players)).toBe(true);
+
+    new RoomManager(room).setReady('p2', true);
+    expect(Array.isArray(room.players)).toBe(true);
+
+    // A join through LobbyManager after those RoomManager calls must still
+    // work as plain-array push, not break on an unexpected Map.
+    rooms.joinRoom(room.id, { id: 'p3', name: 'Third' });
+    expect(room.players).toHaveLength(3);
+
+    const state = new RoomManager(room).getRoomState();
+    expect(state.players.map(entry => entry.player.id)).toEqual(['p1', 'p2', 'p3']);
+    expect(state.players[1].status).toBe('ready');
   });
 
   it('does not ban a player from rooms owned by someone else', () => {

@@ -1,18 +1,37 @@
 # Multiplayer WebSocket Payloads
 
-Connect to `ws://{{host}}:{{port}}/multiplayer` and send/receive JSON text
-frames. Every client message needs a `type` field; every server message has a
-`type` field plus a payload. On error the server always replies
-`{ "type": "error", "message": "<reason>" }` instead of closing the socket.
+## Logging in first
 
-On connect, the server immediately sends:
+The server **requires a logged-in session to even open the connection** —
+there is no anonymous play. Before connecting, get credentials via the
+HTTP auth flow (see the bottom of this file): `POST /users/login` with
+`{ "email": "..." }` emails a one-click login link, and clicking it (or
+manually calling `POST /users/verify` with `{ "email", "token" }` in
+Postman) returns `{ "user", "authToken" }`.
+
+Connect to `ws://{{host}}:{{port}}/multiplayer?email=<email>&token=<authToken>`
+(both query params, URL-encoded) and send/receive JSON text frames. A
+missing or invalid `email`/`token` pair gets the connection **rejected at
+the HTTP upgrade step** — the WebSocket simply never finishes opening (no
+`error` message frame, since no connection was ever established; in a
+browser this surfaces as `onerror`/`onclose` firing without `onopen` ever
+having fired). Every client message needs a `type` field; every server
+message has a `type` field plus a payload. On any other failure the server
+replies `{ "type": "error", "message": "<reason>" }` instead of closing
+the socket.
+
+On a successful connection, the server immediately sends:
 
 ```json
-{ "type": "connected", "playerId": "<uuid>" }
+{ "type": "connected", "playerId": "<uuid>", "email": "<the logged-in email>" }
 ```
 
 Keep that `playerId` — it identifies this socket as a player for the rest of
-the session (used for ownership checks, kick targets, etc.).
+the session (used for ownership checks, kick targets, etc.). The server also
+keeps `email` attached to this connection's player object internally (so it
+always knows which authenticated account a connection belongs to), but it is
+**not** broadcast to other players — `players_list`/`room_updated`/etc. still
+only ever show `{ id, name }` per player, never email.
 
 ---
 
@@ -396,3 +415,24 @@ Unknown `type` values return:
 
 Malformed (non-JSON) frames return the same, with
 `"message must be valid JSON"`.
+
+---
+
+## Getting credentials for the WebSocket connection (plain HTTP, not WS)
+
+These are regular HTTP requests (not WebSocket frames) — do them in
+Postman first to get the `email`/`token` pair the connection above needs.
+
+**`POST /users/login`** — `{ "email": "you@example.com" }`. Creates the
+account on the fly if that email is new (no separate register step).
+Replies `{ "user", "emailSent": true|false }` and emails a one-click
+login link — the token is never returned in this response, only inside
+the emailed link (`<frontend>/?token=...&email=...`).
+
+**`POST /users/verify`** — `{ "email": "...", "token": "<from the link>" }`.
+Replies `{ "user", "authToken" }` on success (the token is single-use and
+expires in 15 minutes). This `authToken`, together with the `email`, is
+what goes on the WebSocket URL's `?email=&token=` query params.
+
+Full endpoint behavior (including `/users/profile`, `/users/logout`, and
+every error case) lives in `controller/usersController.js`.

@@ -1,6 +1,7 @@
 // usersRoutes.js
 //
-// Express router for user auth endpoints. Mount in your app with:
+// Express router for the one-click email login endpoints. Mount in your
+// app with:
 //   const usersRoutes = require('./usersRoutes');
 //   app.use('/users', usersRoutes);
 
@@ -10,8 +11,7 @@ const usersController = require('./../controller/usersController');
 const router = express.Router();
 
 // Public routes
-router.post('/register', usersController.register);
-router.post('/resend-code', usersController.resendVerificationCode);
+router.post('/login', usersController.login);
 router.post('/verify', usersController.verifyEmail);
 
 // Protected routes (require Authorization: Bearer <token> + x-user-email header)

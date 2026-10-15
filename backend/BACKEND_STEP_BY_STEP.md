@@ -16,9 +16,8 @@ verified against the actual test run on 2026-10-08 (see Step 9).
   lobby-level concern (deleting the room when it empties out). There is a
   single source of truth for "remove a player from a room."
 
-## Step 2: Normalize Room State — **Partially done (one known bug, not yet fixed)**
+## Step 2: Normalize Room State — **Done (bug fixed)**
 
-What's working:
 - `RoomManager` accepts the lobby's room, defaults `code` from `id`, defaults
   `type_of_game` to `1`, normalizes every player into
   `{ player: { id, name }, status, score }` with `not_ready`/`0` defaults, and
@@ -26,27 +25,33 @@ What's working:
   leak internal references (verified by the "isolates public player views"
   and "safe player list" tests).
 
-The bug (still present, unfixed):
-- The constructor does `this.room = room` (same object reference from the
-  lobby, not a copy), then does `this.room.players = players.map(normalizePlayer)`.
-  That line **permanently mutates the lobby's stored room**, converting
-  `room.players` from a `Map` into a plain array the first time *any*
-  `RoomManager` is constructed for that room (every `get_room`, `set_ready`,
-  `get_players`, and `manage_player` call does this).
-- `LobbyManager.joinRoom` branches on `room.players instanceof Map` to decide
-  how to add a player, and `websocketServer.js`'s `playerCount()` /
-  `listRoomsState()` also branch on `instanceof Map`. Today these branches
-  happen to produce a working array-path too, so nothing currently crashes —
-  but the room's "shape" silently flips the first time it's touched by a
-  room-manager call, which is fragile: any other code added later that
-  assumes `room.players` is always a `Map` (or always an array) will break
-  depending on call order.
-- Fix direction: have `RoomManager` normalize into a **local copy**
-  (`this.room = { ...room, players: normalizedArray }`) rather than mutating
-  the lobby's room in place, or have `LobbyManager` store players as an
-  array from the start so there's one representation everywhere.
-- No regression test exists yet proving a second `RoomManager` construction
-  on the same lobby-held room is safe — see Step 9.
+The bug (fixed): `LobbyManager.createRoom` used to initialize `players: new
+Map()`, but `RoomManager`'s constructor always normalizes `room.players`
+into a plain array and writes it back onto the same shared room object
+(`this.room = room` — not a copy — so that `setReady`/`leaveRoom`/
+`managePlayer` mutations actually persist across separate WebSocket calls).
+The first time any `RoomManager` touched a room, this silently flipped
+`room.players` from a `Map` to an array, and `LobbyManager.joinRoom` /
+`websocketServer.js`'s `playerCount()` both had to carry `instanceof Map`
+branches to cope with either shape existing at different points in a room's
+life.
+
+Fix applied: `LobbyManager` now creates rooms with `players: []` — a plain
+array from the start, the same representation `RoomManager` already
+normalizes into. There is now exactly one representation for the lifetime of
+a room, so the shape never flips:
+- `lobbyManager.js`: `createRoom` initializes `players: []`; `joinRoom`
+  dropped its `playersAreMapped` branch and always does array `.push()`.
+- `websocketServer.js`: `playerCount(room)` simplified to `room.players.length`
+  (dropped its `instanceof Map` branch).
+- `RoomManager`'s constructor still accepts either a `Map` or an array as
+  input (used directly by some standalone unit-test fixtures), so nothing
+  that constructed a `RoomManager` by hand broke.
+- Regression test added in `test/gameStatus.test.js`: creates a room through
+  the real `LobbyManager`, runs several separate `RoomManager` constructions
+  against the same stored room (mirroring `get_room`/`set_ready` each being
+  a fresh instance per WebSocket message), and asserts `room.players` stays
+  a plain array throughout and a subsequent `joinRoom` still works correctly.
 
 ## Step 3: Leave a Room — **Done**
 
@@ -114,10 +119,10 @@ types, plus `create_room`, `join_room`, `delete_room`, `list_rooms`, and
   owner, and refreshes `rooms_list`. For `ban`, also calls
   `LobbyManager.banPlayer` to persist the permanent block.
 
-Caveat: because every one of these handlers constructs a fresh `new
-RoomManager(room)`, each call re-triggers the Step 2 mutation bug — worth
-fixing before relying on this integration long-term, even though current
-behavior is correct.
+Each of these handlers constructs a fresh `new RoomManager(room)` per
+message — previously this re-triggered the Step 2 mutation bug on every
+call; now that rooms are always arrays, repeated construction is safe (see
+Step 2 and Step 9's regression test).
 
 Known gap: `list_rooms` / `rooms_list` reports `owner: room.ownerId` — fixed
 (previously read the nonexistent `room.owner` and always sent `undefined`).
@@ -125,13 +130,16 @@ Known gap: `list_rooms` / `rooms_list` reports `owner: room.ownerId` — fixed
 ## Step 9: Tests — **Done for everything currently in scope**
 
 Full suite result (`npx jest --forceExit`, verified stable across repeated
-runs on 2026-10-08): **4 of 6 suites pass, 51/51 tests passing** in
-`roomManager.test.js`, `gameStatus.test.js`, `websocketServer.test.js`, and
-`dictionaryService.test.js`. The other 2 suites (`users.test.js`,
+runs, most recently 2026-10-15): **4 of 6 suites pass, 52/52 tests passing**
+in `roomManager.test.js`, `gameStatus.test.js`, `websocketServer.test.js`,
+and `dictionaryService.test.js`. The other 2 suites (`users.test.js`,
 `usersService.test.js`, 46 tests) fail only because there's no reachable
 Postgres instance in this environment (`beforeAll` does `pool.query('SELECT
 1;')` as a connectivity check) — unrelated to the multiplayer/room-manager
-code and pre-existing.
+code and pre-existing. (Those two files also reveal an email/verification-
+code auth service already partially built — `registerUser`,
+`verifyEmail`, `generateVerificationCode`, `generateAuthToken`, etc. Worth
+reading before scoping Step 12; it may already cover a chunk of it.)
 
 Coverage that exists today:
 - `roomManager.test.js` — field defaults, player normalization (including
@@ -166,10 +174,12 @@ intended `player_banned` event. Switched to `nextRelevantMessage`, matching
 the pattern already used elsewhere in the same file for this exact race.
 Confirmed stable across 3 repeated full-suite runs afterward.
 
+- Added for the Step 2 fix: a regression test proving repeated `RoomManager`
+  construction against the same `LobbyManager`-held room keeps `players` a
+  plain array throughout and that joins/ready-updates keep working
+  correctly afterward.
+
 Still missing:
-- No regression test proving a second `RoomManager` construction on the same
-  lobby-held room doesn't corrupt it (the Step 2 bug). Can't fully land this
-  until Step 2 is actually fixed, since today's behavior *is* the bug.
 - No `unban` action/tests (not implemented — see Step 11).
 
 ## Step 10: Leaving Functionality — **Done**
@@ -222,38 +232,94 @@ created by that same owner, present or future.
 Not implemented: an `unban` action — there is currently no way to reverse a
 ban.
 
-## Step 12: Email-Based Login — **Not started**
+## Step 12: Email-Based Login — **Mostly done (one-click link, not a typed code)**
 
-Scope as given: a player enters their email to create an account or log into
-an existing one. The server emails them a verification code, which they
-enter into the game to complete login. Not yet designed or implemented.
-Open questions to settle before building:
-- Where account state lives — there's an existing `backend/data`/`sql`/
-  `service`/`controller`/`routes` layer with a users table (`users.test.js`,
-  `usersService.test.js`) separate from the in-memory `multiplayer/` room
-  state; this almost certainly extends that, not the room manager.
-- Verification code: generation, expiry, one-time use, retry/resend limits,
-  rate limiting on both "send code" and "submit code" to prevent abuse.
-- Email delivery mechanism (which provider/service) and what happens if
-  sending fails.
-- How a verified login maps to the existing multiplayer flow — does the
-  WebSocket `player.id` (currently a random UUID assigned per connection)
-  become tied to an authenticated account id, and if so at what point in the
-  connection/create_room/join_room flow.
-- Session/token handling after verification (how "logged in" is represented
-  and carried on subsequent requests/connections).
+Scope changed from the original plan: instead of a 6-digit code the user
+types in, login is a one-click link in the email. Final shape, as built:
 
-Not implemented yet — behavior needs to be defined first, same as `ban` was
-scoped before Step 11 was built.
+- **One endpoint, no separate register:** `POST /users/login` `{ email }`.
+  Looks up the user; if the email has no account yet, creates one silently
+  right there (no username collected, no separate "create account" step,
+  nothing in the response distinguishes new vs. returning). Either way,
+  issues a fresh 64-char random token (15-min expiry, reusing the existing
+  `verificationcode`/`vcexpierytime` columns — no schema change) and emails
+  a one-click link containing it, then responds `200 { user, emailSent }`.
+  A failed email send doesn't fail the request (account/token already
+  exist) — just reports `emailSent: false`.
+- `POST /users/verify` `{ email, token }` exchanges the link's token for a
+  24h `authenticationtoken`, same mechanism as before (`usersService`'s
+  `verifyEmail` needed no logic changes — a long token compares just like
+  a short code did).
+- Email sending reuses the already-existing `scripts/send-email.js`
+  (`nodemailer` + Gmail, credentials already in `.env`) — this piece was
+  already working before this step and needed no changes.
+- `service/usersService.js`: `registerUser`/`resendVerificationCode`
+  replaced by `requestLogin(email)` + a shared `issueLoginToken(user)`
+  helper.
+- `controller/usersController.js` / `routes/usersRoutes.js`: `register`/
+  `resend-code` routes replaced by the single `login` route; `verify`
+  kept, now token-based.
+- `frontend/relay/src/App.jsx`: added the first auth UI the frontend has
+  ever had — a dedicated `'login'` screen (email input + "Log in" button
+  calling `/users/login`) that gates *everything*, including Solo play,
+  until the user has logged in. An on-mount handler detects `?token=&email=`
+  in the URL (what the emailed link points at, via a new `FRONTEND_URL` env
+  var), calls `/users/verify`, stores the resulting `authToken` in
+  localStorage, strips the query string so a refresh doesn't retry an
+  already-consumed token, and advances to the menu screen.
+- Tests updated in `test/usersService.test.js` for the new
+  `requestLogin`/token shape; `test/users.test.js` (data-layer) untouched.
+
+**Identity now tied into the WebSocket layer too** (this used to be listed
+as deferred — it's done):
+- `multiplayer/websocketServer.js` now requires a valid login to even open
+  a WebSocket connection. The `WebSocketServer` is constructed with
+  `noServer: true`, and a new `server.on('upgrade', ...)` handler parses
+  `?email=&token=` off the connection URL, validates them via the existing
+  `usersService.validateAuthToken`, and only then calls
+  `websocketServer.handleUpgrade(...)` — an invalid/missing pair gets a raw
+  `401` and the socket destroyed before any WebSocket connection exists (no
+  `error` message frame, since no connection was ever established).
+- The per-connection `player` object gains an `email` field (`player =
+  { id, name, email }`), available to all WS handlers server-side.
+  Deliberately **not** broadcast to other clients — `getPlayerList`/
+  `getRoomState`/`players_list`/`room_updated` etc. still only ever show
+  `{ id, name }` per player, to avoid leaking emails between room members.
+- `frontend/relay/src/App.jsx`'s WebSocket-connect effect now only connects
+  once logged in, puts `email`/`authToken` on the connection URL, and
+  treats a connection that never reaches `onopen` as an expired/invalid
+  session — clears stored auth and bounces back to the login screen.
+- `test/websocketServer.test.js` needed the biggest update: every test
+  connection now needs a real `authToken`, so the suite gained the same
+  DB-integration setup `usersService.test.js` has (`beforeAll` DB check,
+  per-test unique emails, `afterAll` cleanup), plus a new `authedConnect()`
+  helper (calls the real `requestLogin`/`verifyEmail` service functions,
+  then connects with the resulting credentials) that replaced every bare
+  `connect(url)` call site.
+- Full suite: 95/95 passing, verified stable across multiple repeated runs
+  (both parallel and `--runInBand`). One caveat worth noting: a single
+  parallel run did show transient failures in `websocketServer.test.js`
+  that didn't reproduce on retry or under `--runInBand` — looks like
+  connection contention against the remote Aiven Postgres when several
+  Jest worker processes hit it simultaneously (this suite went from zero
+  DB dependency to ~80 extra real DB round trips), not a logic bug. Worth
+  watching if it recurs; `--runInBand` is the reliable fallback.
+
+**Still open:**
+- Known pre-existing caveat, newly relevant: `LobbyManager.bansByOwner`/
+  `room.ownerId` are keyed by the ephemeral per-connection `player.id`
+  (still a random UUID), not by email — so a ban still wouldn't survive
+  the *owner* disconnecting and reconnecting (they'd get a new `player.id`,
+  hence a new `ownerId` on their next created room). Not fixed here;
+  flagged as a candidate follow-up now that real per-connection identity
+  exists.
+- No rate-limiting on `/users/login` yet (repeated calls just keep
+  reissuing tokens).
 
 ## What's next
 
-1. Fix the Step 2 mutation bug (copy-on-normalize in `RoomManager`, or
-   standardize `LobbyManager` to store players as an array from creation),
-   then add the regression test that proves it.
-2. Define exact scope for Step 12 (email-based login) and start
-   implementation — likely the biggest remaining chunk of work.
+1. Decide whether ownership/ban identity should move from the ephemeral
+   `player.id` to the stable `player.email` (fixes the reconnect caveat
+   above).
+2. Add rate-limiting to `POST /users/login` (currently uncapped).
 3. Decide whether an `unban` action is needed for Step 11.
-4. Get `users.test.js` / `usersService.test.js` runnable in this environment
-   (a reachable Postgres instance, or a test-env fallback) so the full suite
-   can be verified end-to-end rather than just the 4 non-DB suites.

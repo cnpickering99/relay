@@ -1,0 +1,3 @@
+<p>Hi {{name}},</p>
+<p>This is a templated message sent from Relay.</p>
+<p>Best,<br/>The Team</p>
