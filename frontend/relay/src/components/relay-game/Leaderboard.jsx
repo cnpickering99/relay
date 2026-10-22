@@ -5,19 +5,26 @@ import { getLeaderboard } from "../../api/scoresapi.js";
 
 const font = "'Poppins', 'Nunito', sans-serif";
 
-export default function Leaderboard({ onBack }) {
+export default function Leaderboard({ onBack, auth }) {
   const [scores, setScores] = useState([]);
+  const [me, setMe] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     let active = true;
 
     const loadScores = async () => {
-      const data = await getLeaderboard();
-      if (active) {
-        setScores(data);
-        setLoading(false);
+      try {
+        const data = await getLeaderboard(auth);
+        if (!active) return;
+        setScores(data.scores);
+        setMe(data.me);
+      } catch (err) {
+        console.error("Failed to fetch leaderboard:", err);
+        if (active) setError(true);
       }
+      if (active) setLoading(false);
     };
 
     loadScores();
@@ -25,7 +32,7 @@ export default function Leaderboard({ onBack }) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [auth]);
 
   const medals = ["🥇", "🥈", "🥉"];
 
@@ -81,6 +88,15 @@ export default function Leaderboard({ onBack }) {
           }}>
             Loading scores...
           </div>
+        ) : error ? (
+          <div style={{
+            textAlign: "center",
+            color: C.muted,
+            fontSize: 14,
+            marginTop: 60,
+          }}>
+            Couldn't load the leaderboard — try again shortly.
+          </div>
         ) : scores.length === 0 ? (
           <div style={{
             textAlign: "center",
@@ -93,11 +109,11 @@ export default function Leaderboard({ onBack }) {
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {scores.map((entry, i) => (
-              <div key={i} style={{
-                background: i === 0
+              <div key={`${i}-${entry.username}`} style={{
+                background: i === 0 || entry.isMe
                   ? "rgba(245,197,24,0.12)"
                   : "rgba(255,255,255,0.05)",
-                border: i === 0
+                border: i === 0 || entry.isMe
                   ? "1px solid rgba(245,197,24,0.3)"
                   : "1px solid rgba(255,255,255,0.08)",
                 borderRadius: 16,
@@ -124,7 +140,7 @@ export default function Leaderboard({ onBack }) {
                     color: C.white,
                     marginBottom: 2,
                   }}>
-                    {entry.username}
+                    {entry.username}{entry.isMe ? " (you)" : ""}
                   </div>
                   <div style={{
                     fontSize: 11, fontWeight: 600,
@@ -147,6 +163,26 @@ export default function Leaderboard({ onBack }) {
           </div>
         )}
       </div>
+
+      {/* Your rank / best */}
+      {me && (
+        <div style={{
+          marginTop: 20,
+          padding: "12px 18px",
+          borderRadius: 14,
+          background: "rgba(245,197,24,0.12)",
+          border: "1px solid rgba(245,197,24,0.3)",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          color: C.white,
+          fontSize: 13,
+          fontWeight: 700,
+        }}>
+          <span>Your rank: #{me.rank}</span>
+          <span>Best: {me.best.score}</span>
+        </div>
+      )}
 
       {/* Back button */}
       <button

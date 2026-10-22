@@ -2,11 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import './App.css'
 import RelayGame from './components/relay-game'
 import MultiplayerLobby from './components/multiplayer/MultiplayerLobby.jsx'
+import MultiplayerRoom from './components/multiplayer/MultiplayerRoom.jsx'
+import MultiplayerGame from './components/multiplayer/MultiplayerGame.jsx'
+import MultiplayerResults from './components/multiplayer/MultiplayerResults.jsx'
 
 const ACTIVE_ROOM_KEY = 'relay-active-room'
 const TOAST_STORAGE_KEY = 'relay-room-toast'
 const LEGACY_ROOM_STORAGE_KEY = 'relay-open-rooms'
 const AUTH_STORAGE_KEY = 'relay-auth'
+// Every screen that belongs to being inside a room.
+const ROOM_SCREENS = ['multiplayer-room', 'multiplayer-game', 'multiplayer-results']
 const SOCKET_URL = 'ws://localhost:3000/multiplayer'
 const API_URL = 'http://localhost:3000'
 
@@ -86,6 +91,16 @@ function App() {
   const toastTimerRef = useRef(null)
   const socketRef = useRef(null)
   const roomIdRef = useRef(roomId)
+  // Live state for the room the player is currently in (null when in the lobby).
+  const [myPlayerId, setMyPlayerId] = useState('')
+  const [currentRoom, setCurrentRoom] = useState(null)
+  const [chatMessages, setChatMessages] = useState([])
+  // The running timed game: { endsAt (local clock), durationMs }, this player's
+  // own run, everyone's scores, and (once it ends) the results.
+  const [game, setGame] = useState(null)
+  const [myRun, setMyRun] = useState(null)
+  const [scoreboard, setScoreboard] = useState([])
+  const [gameResult, setGameResult] = useState(null)
 
   useEffect(() => {
     roomIdRef.current = roomId
@@ -95,7 +110,10 @@ function App() {
     if (!room || !room.roomId && !room.id) return null
 
     const roomId = room.roomId || room.id
-    const playersCount = Array.isArray(room.players) ? room.players.length : Number(room.players || 0)
+    // The server sends `playerCount`; `players` is kept for array/number payloads.
+    const playersCount = Array.isArray(room.players)
+      ? room.players.length
+      : Number(room.playerCount ?? room.players ?? 0)
 
     return {
       id: roomId,
@@ -136,6 +154,19 @@ function App() {
 
     setRooms(nextRooms)
   }, [normalizeRoomPayload])
+
+  // Back to the lobby after leaving (or being removed from) a room.
+  const leaveRoomScreen = useCallback(() => {
+    setCurrentRoom(null)
+    setChatMessages([])
+    setGame(null)
+    setMyRun(null)
+    setScoreboard([])
+    setGameResult(null)
+    setRoomId('')
+    writeActiveRoomToStorage('')
+    setScreen((current) => (ROOM_SCREENS.includes(current) ? 'multiplayer-lobby' : current))
+  }, [])
 
   const showToast = (message, type = 'success') => {
     const nextToast = { message, type }
@@ -285,6 +316,7 @@ function App() {
       }
 
       if (payload.type === 'connected') {
+        setMyPlayerId(payload.playerId || '')
         return
       }
 
@@ -298,7 +330,120 @@ function App() {
         setRoomId(nextRoomId)
         writeActiveRoomToStorage(nextRoomId)
         if (payload.room) syncRoomsFromServer(payload.room)
+        setCurrentRoom(null)
+        setChatMessages([])
+        setScreen('multiplayer-room')
         socket.send(JSON.stringify({ type: 'list_rooms' }))
+        socket.send(JSON.stringify({ type: 'get_room' }))
+        socket.send(JSON.stringify({ type: 'get_chat' }))
+        return
+      }
+
+      if (payload.type === 'room_state' || payload.type === 'player_managed') {
+        if (payload.room) setCurrentRoom(payload.room)
+        return
+      }
+
+      if (payload.type === 'room_updated') {
+        // Only the room we're in matters here; the lobby list has its own feed.
+        if (payload.room && payload.room.code === roomIdRef.current) setCurrentRoom(payload.room)
+        return
+      }
+
+      if (payload.type === 'ready_status') {
+        // Our own toggle: the server only broadcasts it to the *other* members.
+        setCurrentRoom((room) => room && {
+          ...room,
+          players: room.players.map((entry) => (
+            entry.player.id === payload.playerId ? { ...entry, status: payload.status } : entry
+          )),
+        })
+        return
+      }
+
+      if (payload.type === 'chat_history') {
+        setChatMessages(Array.isArray(payload.messages) ? payload.messages : [])
+        return
+      }
+
+      if (payload.type === 'chat_message') {
+        setChatMessages((messages) => (
+          messages.some((message) => message.id === payload.message.id)
+            ? messages
+            : [...messages, payload.message]
+        ))
+        return
+      }
+
+      if (payload.type === 'game_started') {
+        // The server's clock may differ from ours; only trust "time left".
+        const msLeft = payload.game.endsAt - payload.game.serverNow
+        setGame({ endsAt: Date.now() + msLeft, durationMs: payload.game.durationMs })
+        setMyRun({ fragment: payload.game.fragment, score: 0, wordsUsed: [], finished: false, finishReason: null })
+        setScoreboard(payload.scoreboard || [])
+        setGameResult(null)
+        if (payload.room) setCurrentRoom(payload.room)
+        setScreen('multiplayer-game')
+        return
+      }
+
+      if (payload.type === 'word_accepted') {
+        setMyRun((run) => run && {
+          ...run,
+          score: payload.score,
+          fragment: payload.fragment,
+          wordsUsed: [...run.wordsUsed, payload.word],
+        })
+        showToast(`+${payload.points} pts`, 'success')
+        return
+      }
+
+      if (payload.type === 'word_rejected') {
+        showToast(payload.message || 'Word not accepted.', 'error')
+        return
+      }
+
+      if (payload.type === 'player_finished') {
+        setMyRun((run) => run && {
+          ...run,
+          score: payload.score,
+          finished: true,
+          finishReason: { word: payload.word, lastTwo: payload.lastTwo },
+        })
+        return
+      }
+
+      if (payload.type === 'game_progress') {
+        setScoreboard(payload.scoreboard || [])
+        return
+      }
+
+      if (payload.type === 'game_ended') {
+        setGame(null)
+        setGameResult({ results: payload.results, winnerIds: payload.winnerIds, isTie: payload.isTie })
+        setScreen('multiplayer-results')
+        return
+      }
+
+      if (payload.type === 'room_left') {
+        leaveRoomScreen()
+        return
+      }
+
+      if (payload.type === 'player_kicked' || payload.type === 'player_banned') {
+        leaveRoomScreen()
+        showToast(
+          payload.type === 'player_banned'
+            ? 'You were banned from the room.'
+            : 'You were kicked from the room.',
+          'error',
+        )
+        return
+      }
+
+      if (payload.type === 'room_deleted') {
+        leaveRoomScreen()
+        showToast('The room was closed by its owner.', 'error')
         return
       }
 
@@ -337,7 +482,8 @@ function App() {
     }
 
     socket.onclose = () => {
-      socketRef.current = null
+      // A newer socket may already have replaced this one; don't clobber its ref.
+      if (socketRef.current === socket) socketRef.current = null
 
       // The browser WebSocket API never exposes *why* a connection failed
       // (no HTTP status code reaches JS), so "never got to open" is the
@@ -357,7 +503,7 @@ function App() {
       }
       socketRef.current = null
     }
-  }, [auth, syncRoomsFromServer, syncRoomsListFromServer])
+  }, [auth, syncRoomsFromServer, syncRoomsListFromServer, leaveRoomScreen])
 
   useEffect(() => {
     if (!toast.message) return
@@ -384,6 +530,9 @@ function App() {
         type: 'create_room',
         name,
         owner: name,
+        roomName: payload.roomName,
+        maxPlayers: payload.maxPlayers,
+        code: payload.code,
       }))
       showToast('Creating room...', 'success')
       return
@@ -420,6 +569,42 @@ function App() {
     }
 
     showToast('Unable to connect to multiplayer server.', 'error')
+  }
+
+  const sendToServer = (message) => {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify(message))
+      return true
+    }
+    showToast('Unable to connect to multiplayer server.', 'error')
+    return false
+  }
+
+  const handleLeaveRoom = () => {
+    sendToServer({ type: 'leave_room' })
+  }
+
+  const handleSubmitWord = (word) => {
+    sendToServer({ type: 'submit_word', word })
+  }
+
+  const handleBackToRoom = () => {
+    setGameResult(null)
+    setScreen('multiplayer-room')
+  }
+
+  const handleToggleReady = () => {
+    const me = currentRoom?.players.find((entry) => entry.player.id === myPlayerId)
+    if (!me) return
+    sendToServer({ type: 'set_ready', ready: me.status !== 'ready' })
+  }
+
+  const handleManagePlayer = (targetPlayerId, action) => {
+    sendToServer({ type: 'manage_player', targetPlayerId, action })
+  }
+
+  const handleSendChat = (text) => {
+    sendToServer({ type: 'chat', text })
   }
 
   const handleBackToMenu = () => {
@@ -520,9 +705,49 @@ function App() {
     return (
       <>
         <section id="center">
-          <RelayGame />
+          <RelayGame auth={auth} />
         </section>
       </>
+    )
+  }
+
+  if (screen === 'multiplayer-game' && game && myRun) {
+    return (
+      <MultiplayerGame
+        game={game}
+        run={myRun}
+        scoreboard={scoreboard}
+        myPlayerId={myPlayerId}
+        toast={toast}
+        onSubmitWord={handleSubmitWord}
+      />
+    )
+  }
+
+  if (screen === 'multiplayer-results' && gameResult) {
+    return (
+      <MultiplayerResults
+        result={gameResult}
+        myPlayerId={myPlayerId}
+        toast={toast}
+        onBackToRoom={handleBackToRoom}
+        onLeave={handleLeaveRoom}
+      />
+    )
+  }
+
+  if (screen === 'multiplayer-room') {
+    return (
+      <MultiplayerRoom
+        room={currentRoom}
+        myPlayerId={myPlayerId}
+        messages={chatMessages}
+        toast={toast}
+        onSendChat={handleSendChat}
+        onToggleReady={handleToggleReady}
+        onManagePlayer={handleManagePlayer}
+        onLeave={handleLeaveRoom}
+      />
     )
   }
 
@@ -530,7 +755,7 @@ function App() {
     return (
       <MultiplayerLobby
         roomId={roomId}
-        playerName={playerName}
+        playerName={playerName === 'Player' ? (auth?.email?.split('@')[0] || 'Player') : playerName}
         hasActiveRoom={Boolean(roomId)}
         rooms={rooms}
         onCreateRoom={handleCreateRoom}

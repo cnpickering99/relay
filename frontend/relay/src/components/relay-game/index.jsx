@@ -18,7 +18,7 @@ import { submitScore } from "../../api/scoresapi.js";
 const font = "'Poppins', 'Nunito', sans-serif";
 const getFragment = (word) => word.slice(-2).toUpperCase();
 
-export default function RelayGame() {
+export default function RelayGame({ auth }) {
   const [wordsUsed, setWordsUsed] = useState([]);
   const [fragment, setFragment] = useState(() => getRandomFragment());
   const [score, setScore] = useState(0);
@@ -112,8 +112,8 @@ export default function RelayGame() {
       setGameOverReason({ word, lastTwo });
       setIsGameOver(true);
 
-      // Submit score to backend
-      await submitScore("Player", score, wordsUsed.length);
+      // Submit score to backend (logged-in players only)
+      if (auth) await submitScore(auth, score, wordsUsed.length);
       return;
     }
 
@@ -246,7 +246,7 @@ export default function RelayGame() {
               transform: menuVisible ? "scale(1)" : "scale(0.96)",
               transition: "opacity 0.4s ease, transform 0.4s ease",
             }}>
-              <Menu onPlay={handlePlay} />
+              <Menu onPlay={handlePlay} auth={auth} />
             </div>
           )}
 

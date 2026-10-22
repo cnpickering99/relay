@@ -166,7 +166,7 @@ function HowToPlay({ onBack }) {
   );
 }
 
-export default function Menu({ onPlay }) {
+export default function Menu({ onPlay, auth }) {
   const [showHowTo, setShowHowTo] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
 
@@ -175,7 +175,7 @@ export default function Menu({ onPlay }) {
   }
 
   if (showLeaderboard) {
-    return <Leaderboard onBack={() => setShowLeaderboard(false)} />;
+    return <Leaderboard auth={auth} onBack={() => setShowLeaderboard(false)} />;
   }
 
   return (

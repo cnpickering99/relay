@@ -2,10 +2,15 @@ const WebSocket = require('ws');
 const { WebSocketServer } = WebSocket;
 const crypto = require('crypto');
 const LobbyManager = require('./lobbyManager');
+const { GameStatus } = require('./enums');
 const RoomManager = require('./roomManager');
+const GameManager = require('./gameManager');
 const usersService = require('./../service/usersService');
+const { createDictionaryService } = require('./../service/dictionaryService');
 
 const MULTIPLAYER_PATH = '/multiplayer';
+const CHAT_HISTORY_LIMIT = 50;
+const CHAT_MAX_LENGTH = 500;
 
 function playerCount(room) {
   return room.players.length;
@@ -59,9 +64,74 @@ function ensurePlayerIsNotInRoom(sockets, socket) {
   }
 }
 
-function createWebSocketServer(server) {
+/**
+ * @param {import('http').Server} server
+ * @param {Object} [options]
+ * @param {Object} [options.dictionary] word checker (isRealWord / isChainable); defaults to Datamuse
+ * @param {number} [options.gameDurationMs] length of a game; defaults to 2:00
+ */
+function createWebSocketServer(server, options = {}) {
   const rooms = new LobbyManager();
+  const games = new GameManager({
+    dictionary: options.dictionary ?? createDictionaryService(),
+    durationMs: options.gameDurationMs,
+  });
   const sockets = new Map();
+  // roomId -> last CHAT_HISTORY_LIMIT messages. In memory only; dropped with the room.
+  const chatByRoom = new Map();
+  const dropChatIfRoomGone = id => {
+    if (id && !rooms.getRoom(id)) chatByRoom.delete(id);
+  };
+  // roomId -> timeout that ends the game when the clock runs out.
+  const gameTimers = new Map();
+  const clearGameTimer = id => {
+    clearTimeout(gameTimers.get(id));
+    gameTimers.delete(id);
+  };
+
+  const finishGame = id => {
+    clearGameTimer(id);
+    const room = rooms.getRoom(id);
+    if (!room || !games.isActive(room)) return;
+
+    const outcome = games.end(room);
+    broadcastRoom(sockets, room.id, 'game_ended', outcome);
+    broadcastRoom(sockets, room.id, 'room_updated', { room: new RoomManager(room).getRoomState() });
+    broadcastRoomList(sockets);
+  };
+
+  const startGame = room => {
+    const snapshot = games.start(room);
+    const timer = setTimeout(() => finishGame(room.id), Math.max(0, snapshot.endsAt - games.now()));
+    timer.unref?.();
+    gameTimers.set(room.id, timer);
+
+    broadcastRoom(sockets, room.id, 'game_started', {
+      room: new RoomManager(room).getRoomState(),
+      game: snapshot,
+      scoreboard: games.scoreboard(room),
+    });
+    broadcastRoomList(sockets);
+  };
+
+  // A player left, was kicked, or disconnected: drop them from a running
+  // game and end it if it can't go on.
+  const afterPlayerRemoved = (id, playerId) => {
+    const room = rooms.getRoom(id);
+    if (!room) {
+      clearGameTimer(id);
+      return;
+    }
+    if (!games.isActive(room)) return;
+
+    games.removePlayer(room, playerId);
+    if (games.shouldEnd(room)) {
+      finishGame(room.id);
+    } else {
+      broadcastRoom(sockets, room.id, 'game_progress', { scoreboard: games.scoreboard(room) });
+    }
+  };
+
   // noServer: auth happens on the raw HTTP upgrade below, before a
   // WebSocket connection is ever established — see server.on('upgrade').
   const websocketServer = new WebSocketServer({ noServer: true });
@@ -134,6 +204,7 @@ function createWebSocketServer(server) {
             ownerId: player.id,
           });
           roomId = room.id;
+          chatByRoom.delete(roomId);
           player.name = playerName;
           rooms.joinRoom(roomId, player);
           sockets.get(socket).roomId = roomId;
@@ -145,6 +216,8 @@ function createWebSocketServer(server) {
 
         if (message.type === 'delete_room') {
           const deletedRoom = rooms.deleteRoom(message.roomId || message.code, player.id);
+          chatByRoom.delete(deletedRoom.id);
+          clearGameTimer(deletedRoom.id);
           for (const [client, clientState] of sockets) {
             if (clientState.roomId === deletedRoom.id) {
               clientState.roomId = null;
@@ -168,6 +241,13 @@ function createWebSocketServer(server) {
             status: room.status,
             room: roomState(room),
           });
+          broadcastRoom(
+            sockets,
+            room.id,
+            'room_updated',
+            { room: new RoomManager(room).getRoomState() },
+            socket,
+          );
           broadcastRoomList(sockets);
           return;
         }
@@ -183,11 +263,81 @@ function createWebSocketServer(server) {
           clientState.roomId = null;
           roomId = null;
           send(socket, 'room_left', { roomId: leavingRoomId });
+          dropChatIfRoomGone(leavingRoomId);
 
           if (updatedRoom?.playerCount > 0) {
             broadcastRoom(sockets, leavingRoomId, 'room_updated', { room: updatedRoom });
           }
           broadcastRoomList(sockets);
+          afterPlayerRemoved(leavingRoomId, player.id);
+          return;
+        }
+
+        if (message.type === 'chat') {
+          const clientState = sockets.get(socket);
+          if (!clientState?.roomId) {
+            throw new Error('player is not in a room');
+          }
+
+          const text = typeof message.text === 'string' ? message.text.trim() : '';
+          if (!text) throw new Error('message cannot be empty');
+          if (text.length > CHAT_MAX_LENGTH) {
+            throw new Error(`message is too long (max ${CHAT_MAX_LENGTH} characters)`);
+          }
+
+          const chatMessage = {
+            id: crypto.randomUUID(),
+            playerId: player.id,
+            name: player.name,
+            text,
+            sentAt: Date.now(),
+          };
+          const history = chatByRoom.get(clientState.roomId) ?? [];
+          history.push(chatMessage);
+          if (history.length > CHAT_HISTORY_LIMIT) history.shift();
+          chatByRoom.set(clientState.roomId, history);
+
+          broadcastRoom(sockets, clientState.roomId, 'chat_message', { message: chatMessage });
+          return;
+        }
+
+        if (message.type === 'get_chat') {
+          const clientState = sockets.get(socket);
+          if (!clientState?.roomId) {
+            throw new Error('player is not in a room');
+          }
+
+          send(socket, 'chat_history', { messages: chatByRoom.get(clientState.roomId) ?? [] });
+          return;
+        }
+
+        if (message.type === 'submit_word') {
+          const clientState = sockets.get(socket);
+          if (!clientState?.roomId) {
+            throw new Error('player is not in a room');
+          }
+
+          const room = rooms.findRoom(clientState.roomId);
+          games.submitWord(room, player.id, message.word)
+            .then(result => {
+              if (result.type === 'rejected') {
+                send(socket, 'word_rejected', { reason: result.reason, message: result.message });
+                return;
+              }
+
+              if (result.type === 'accepted') {
+                const { type, ...accepted } = result;
+                send(socket, 'word_accepted', accepted);
+              } else {
+                const { type, ...finished } = result;
+                send(socket, 'player_finished', finished);
+              }
+
+              if (!games.isActive(room)) return;
+              broadcastRoom(sockets, room.id, 'game_progress', { scoreboard: games.scoreboard(room) });
+              if (games.shouldEnd(room)) finishGame(room.id);
+            })
+            .catch(error => send(socket, 'error', { message: error.message }));
           return;
         }
 
@@ -214,6 +364,7 @@ function createWebSocketServer(server) {
           }
 
           const room = rooms.findRoom(clientState.roomId);
+          if (room.status !== GameStatus.LOBBY) throw new Error('a game is already in progress');
           const roomManager = new RoomManager(room);
           const result = roomManager.setReady(player.id, message.ready);
           send(socket, 'ready_status', result);
@@ -224,6 +375,7 @@ function createWebSocketServer(server) {
             { room: roomManager.getRoomState() },
             socket,
           );
+          if (games.canStart(room)) startGame(room);
           return;
         }
 
@@ -273,6 +425,7 @@ function createWebSocketServer(server) {
 
           send(socket, 'player_managed', { room: updatedRoom });
           broadcastRoomList(sockets);
+          afterPlayerRemoved(room.id, message.targetPlayerId);
           return;
         }
 
@@ -288,6 +441,7 @@ function createWebSocketServer(server) {
       const updatedRoom = closedRoomId ? rooms.removePlayer(closedRoomId, player.id) : null;
       if (state) state.roomId = null;
       sockets.delete(socket);
+      dropChatIfRoomGone(closedRoomId);
 
       if (updatedRoom) {
         if (updatedRoom.playerCount > 0) {
@@ -295,6 +449,7 @@ function createWebSocketServer(server) {
         }
         broadcastRoomList(sockets);
       }
+      if (closedRoomId) afterPlayerRemoved(closedRoomId, player.id);
     });
   });
 
