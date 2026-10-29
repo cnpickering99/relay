@@ -34,6 +34,15 @@ function generateAuthToken() {
   return crypto.randomBytes(32).toString('hex'); // 64-char hex string
 }
 
+/**
+ * Derive the short numeric code shown in the login email from a login
+ * token. It's a pure function of the token, so nothing extra is stored.
+ */
+function loginCodeFor(loginToken) {
+  const digits = crypto.createHash('sha256').update(loginToken).digest().readUInt32BE(0) % 1000000;
+  return String(digits).padStart(6, '0');
+}
+
 function minutesFromNow(minutes) {
   return new Date(Date.now() + minutes * 60 * 1000);
 }
@@ -58,13 +67,13 @@ function toSafeUser(user) {
  * (reusing the verificationcode/vcexpierytime columns).
  *
  * @param {Object} user - a user row with at least `email`
- * @returns {Promise<{ user: Object, loginToken: string }>}
+ * @returns {Promise<{ user: Object, loginToken: string, loginCode: string }>}
  */
 async function issueLoginToken(user) {
   const loginToken = generateAuthToken();
   const expiry = minutesFromNow(LOGIN_TOKEN_TTL_MINUTES);
   const updated = await usersDataLayer.setVerificationCode(user.email, loginToken, expiry);
-  return { user: toSafeUser(updated), loginToken };
+  return { user: toSafeUser(updated), loginToken, loginCode: loginCodeFor(loginToken) };
 }
 
 /**
@@ -110,7 +119,8 @@ async function verifyEmail(email, code) {
     throw new Error('No verification code is pending for this user');
   }
 
-  if (user.verificationcode !== code) {
+  // Accept either the full link token or the 6-digit code derived from it
+  if (user.verificationcode !== code && loginCodeFor(user.verificationcode) !== code) {
     throw new Error('Invalid verification code');
   }
 

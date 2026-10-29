@@ -31,12 +31,15 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
  *
  * @param {string} email
  * @param {string} loginToken
+ * @param {string} loginCode
  * @returns {Promise<boolean>} whether the email actually went out
  */
-async function sendLoginLinkEmail(email, loginToken) {
+async function sendLoginLinkEmail(email, loginToken, loginCode) {
   const link = `${FRONTEND_URL}/?token=${encodeURIComponent(loginToken)}&email=${encodeURIComponent(email)}`;
   const body = `
-    <p>Click below to log in to Relay:</p>
+    <p>Your Relay verification code is:</p>
+    <p style="font-size:28px;font-weight:bold;letter-spacing:4px;">${loginCode}</p>
+    <p>Or click below to log in with one click:</p>
     <p><a href="${link}">Log In to Relay</a></p>
     <p>This link expires in 15 minutes and can only be used once.</p>
   `;
@@ -95,8 +98,8 @@ function handleError(res, err) {
 async function login(req, res) {
   try {
     const { email } = req.body;
-    const { user, loginToken } = await usersService.requestLogin(email);
-    const emailSent = await sendLoginLinkEmail(email, loginToken);
+    const { user, loginToken, loginCode } = await usersService.requestLogin(email);
+    const emailSent = await sendLoginLinkEmail(email, loginToken, loginCode);
     return res.status(200).json({ user, emailSent });
   } catch (err) {
     return handleError(res, err);
